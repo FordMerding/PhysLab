@@ -1,5 +1,5 @@
-import { SimObject } from "../SimObject";
-import { PhysicsBody } from "../physicsBody";
+import { SimObject } from "../../engine/SimObject";
+import { PhysicsBody } from "../../engine/physicsBody";
 
 export class Rectangle extends SimObject{
     private width: number = 1;

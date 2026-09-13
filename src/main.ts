@@ -1,6 +1,6 @@
 import { Vector2 } from "./engine/vector";
 import { PhysicsBody } from "./engine/physicsBody";
-import { Rectangle } from "./engine/objects/rect";
+import { Rectangle } from "./assets/objects/rect";
 
 const canvas = document.getElementById("simulation") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
