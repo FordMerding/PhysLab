@@ -26,10 +26,13 @@ export class Vector2{
     }
     normalize(): Vector2 {
         const len = this.length();
-
-        if(len === 0){
-            return new Vector2(0, 0);
-        }
+        if(len === 0) return new Vector2(0, 0);
         return new Vector2(this.x / len, this.y / len);
+    }
+    perp(): Vector2 {
+        return new Vector2(this.y, -this.x);
+    }
+    distanceTo(v: Vector2): number{
+        return this.sub(v).length();
     }
 }
