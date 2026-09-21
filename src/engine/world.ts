@@ -3,6 +3,10 @@ import { Wall } from "./objects/wall";
 import { Vector2 } from "./vector";
 import { testCollision, resolveCollision } from "./collision";
 
+function shouldCollide(a: SimObject, b: SimObject): boolean {
+    return (a.getCategory() & b.getMask()) !== 0 && (b.getCategory() & a.getMask()) !== 0;
+}
+
 export class World {
     private objects: SimObject[] = [];
     private walls: Wall[] = [];
@@ -22,6 +26,8 @@ export class World {
     }
 
     update(dt: number): void {
+        // continuous forces (springs) apply before integration, same as gravity
+
         for (const obj of this.objects) {
             const body = obj.getBody();
             if (!body.isStatic()) body.addForce(this.gravity.mult(body.getMass()));
@@ -30,6 +36,7 @@ export class World {
 
         for (let i = 0; i < this.objects.length; i++) {
             for (let j = i + 1; j < this.objects.length; j++) {
+                if (!shouldCollide(this.objects[i], this.objects[j])) continue;
                 const info = testCollision(this.objects[i], this.objects[j]);
                 if (info) resolveCollision(this.objects[i], this.objects[j], info);
             }
@@ -37,6 +44,7 @@ export class World {
 
         for (const obj of this.objects) {
             for (const wall of this.walls) {
+                if (!shouldCollide(obj, wall)) continue;
                 const info = testCollision(obj, wall);
                 if (info) resolveCollision(obj, wall, info);
             }
@@ -45,6 +53,8 @@ export class World {
 
     render(ctx: CanvasRenderingContext2D): void {
         for (const wall of this.walls) wall.render(ctx);
-        for (const obj of this.objects) obj.render(ctx);
+        
+        const sorted = [...this.objects].sort((a, b) => a.getZIndex() - b.getZIndex());
+        for (const obj of sorted) obj.render(ctx);
     }
 }

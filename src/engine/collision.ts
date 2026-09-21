@@ -1,7 +1,7 @@
 import { Vector2 } from "./vector";
 import { SimObject } from "./simObject";
-import { PhysicsBody } from "./physicsBody";
 import { CircleCollider, PolygonCollider, PlaneCollider } from "./collider";
+import { cross, pointVelocity, applyImpulseAtPoint } from "./dynamics";
 
 export interface CollisionInfo {
     // points from object A toward object B
@@ -15,11 +15,6 @@ export interface CollisionInfo {
 
 function average(vertices: Vector2[]): Vector2 {
     return vertices.reduce((sum, v) => sum.add(v), new Vector2(0, 0)).div(vertices.length);
-}
-
-// 2D "cross product": returns the (scalar) z-component of the 3D cross product
-function cross(a: Vector2, b: Vector2): number {
-    return a.x * b.y - a.y * b.x;
 }
 
 // --- circle vs circle ---
@@ -223,12 +218,7 @@ export function resolveCollision(a: SimObject, b: SimObject, info: CollisionInfo
     const rA = info.point.sub(bodyA.getPos());
     const rB = info.point.sub(bodyB.getPos());
 
-    // velocity AT THE CONTACT POINT (not the center), since that's what actually collides.
-    // ω × r in 2D is (-ω*r.y, ω*r.x).
-    const pointVel = (body: PhysicsBody, r: Vector2) =>
-        body.getVel().add(new Vector2(-body.getAngularVel() * r.y, body.getAngularVel() * r.x));
-
-    const relVel = pointVel(bodyB, rB).sub(pointVel(bodyA, rA));
+    const relVel = pointVelocity(bodyB, rB).sub(pointVelocity(bodyA, rA));
     const velAlongNormal = relVel.dot(info.normal);
     if (velAlongNormal > 0) return; // already separating
 
@@ -240,16 +230,12 @@ export function resolveCollision(a: SimObject, b: SimObject, info: CollisionInfo
 
     const j = (-(1 + restitution) * velAlongNormal) / normalDenom;
     const impulse = info.normal.mult(j);
-
-    bodyA.setVel(bodyA.getVel().sub(impulse.mult(invMassA)));
-    bodyB.setVel(bodyB.getVel().add(impulse.mult(invMassB)));
-    bodyA.addAngularImpulse(-cross(rA, impulse));
-    bodyB.addAngularImpulse(cross(rB, impulse));
+    applyImpulseAtPoint(bodyA, bodyB, rA, rB, impulse);
 
     // Coulomb friction along the tangent, computed AFTER the normal impulse (standard
     // sequential-impulse order). This is what actually turns sliding into rolling.
     const tangent = info.normal.perp();
-    const relVelAfterNormal = pointVel(bodyB, rB).sub(pointVel(bodyA, rA));
+    const relVelAfterNormal = pointVelocity(bodyB, rB).sub(pointVelocity(bodyA, rA));
     const velAlongTangent = relVelAfterNormal.dot(tangent);
 
     const rACrossT = cross(rA, tangent);
@@ -263,10 +249,7 @@ export function resolveCollision(a: SimObject, b: SimObject, info: CollisionInfo
         jt = Math.max(-maxFriction, Math.min(maxFriction, jt)); // Coulomb's cone, clamped
 
         const frictionImpulse = tangent.mult(jt);
-        bodyA.setVel(bodyA.getVel().sub(frictionImpulse.mult(invMassA)));
-        bodyB.setVel(bodyB.getVel().add(frictionImpulse.mult(invMassB)));
-        bodyA.addAngularImpulse(-cross(rA, frictionImpulse));
-        bodyB.addAngularImpulse(cross(rB, frictionImpulse));
+        applyImpulseAtPoint(bodyA, bodyB, rA, rB, frictionImpulse);
     }
 
     // positional correction (linear only - rotation isn't corrected positionally, just
