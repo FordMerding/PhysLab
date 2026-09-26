@@ -35,7 +35,7 @@ export class PhysicsBody {
     // 0 for static bodies, so "invMassA + invMassB" in impulse math naturally
     // treats them as infinitely heavy without any special-casing at the call site.
     getInvMass(): number {
-        return this.static_ ? 0 : 1 / this.mass;
+        return (this.static_ || this.mass <= 0) ? 0 : 1 / this.mass;
     }
 
     isStatic(): boolean {
@@ -82,7 +82,7 @@ export class PhysicsBody {
     }
 
     getInvInertia(): number {
-        return this.static_ ? 0 : 1 / this.momentOfInertia;
+        return (this.static_ || this.momentOfInertia <= 0) ? 0 : 1 / this.momentOfInertia;
     }
 
     addForce(force: Vector2): void {

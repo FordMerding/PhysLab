@@ -5,7 +5,7 @@ import { Circle } from "./engine/objects/circle";
 import { Triangle } from "./engine/objects/triangle";
 import { createScreenBounds } from "./engine/objects/wall";
 import { World } from "./engine/world";
-
+import { MouseConstraint } from "./engine/constraint";
 const canvas = document.getElementById("simulation") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 
@@ -23,6 +23,34 @@ window.addEventListener("keydown", (event) => {
         paused = !paused;
     }
 })
+
+let mouseConstraint: MouseConstraint | null = null;
+
+function getMousePos(event: MouseEvent): Vector2{
+    const rect = canvas.getBoundingClientRect();
+    return new Vector2(event.clientX - rect.left, event.clientY - rect.top);
+}
+
+canvas.addEventListener("mousedown", (event) => {
+    const mousePos = getMousePos(event);
+    const picked = world.pickObjectAt(mousePos);
+    if(picked) {
+        mouseConstraint = new MouseConstraint(picked.getBody(), mousePos);
+        world.addConstraint(mouseConstraint);
+    }
+});
+
+canvas.addEventListener("mousemove", (event) => {
+    mouseConstraint?.setTarget(getMousePos(event));
+});
+
+window.addEventListener("mouseup", () => {
+    if (mouseConstraint) {
+        world.removeConstraint(mouseConstraint);
+        mouseConstraint = null;
+    }
+});
+
 
 // World Initialization
 const world = new World();

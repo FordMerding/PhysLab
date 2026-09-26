@@ -165,10 +165,9 @@ export class MouseConstraint implements Constraint {
     private body: PhysicsBody;
     private localAnchor: Vector2; // grab point, in the body's own local frame
     private target: Vector2;
-    private stiffness: number;
     private damping: number;
 
-    constructor(body: PhysicsBody, worldGrabPoint: Vector2, stiffness: number = 10000, damping: number = 40) {
+    constructor(body: PhysicsBody, worldGrabPoint: Vector2, damping: number = 40) {
         this.body = body;
         const rotation = -body.getRotation();
         const cos = Math.cos(rotation);
@@ -178,7 +177,6 @@ export class MouseConstraint implements Constraint {
         // as the body spins - otherwise dragging a spinning object would drift
         this.localAnchor = new Vector2(offset.x * cos - offset.y * sin, offset.x * sin + offset.y * cos);
         this.target = worldGrabPoint;
-        this.stiffness = stiffness;
         this.damping = damping;
     }
 
@@ -192,7 +190,7 @@ export class MouseConstraint implements Constraint {
         const r = anchor.sub(this.body.getPos());
         const relVel = pointVelocity(this.body, r);
 
-        const force = delta.mult(this.stiffness).sub(relVel.mult(this.damping));
+        const force = delta.mult(this.body.getMass()).sub(relVel.mult(this.damping));
         applyForceAtPoint(this.body, r, force);
     }
 

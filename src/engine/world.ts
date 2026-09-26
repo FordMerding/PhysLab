@@ -1,6 +1,7 @@
 import { SimObject } from "./simObject";
 import { Wall } from "./objects/wall";
 import { Vector2 } from "./vector";
+import { type Constraint } from "./constraint";
 import { testCollision, resolveCollision } from "./collision";
 
 function shouldCollide(a: SimObject, b: SimObject): boolean {
@@ -10,6 +11,7 @@ function shouldCollide(a: SimObject, b: SimObject): boolean {
 export class World {
     private objects: SimObject[] = [];
     private walls: Wall[] = [];
+    private constraints: Constraint[] = [];
     private gravity: Vector2 = new Vector2(0, 0);
 
     add(obj: SimObject): void {
@@ -18,6 +20,10 @@ export class World {
     addWalls(walls: Wall[]): void {
         this.walls.push(...walls);
     }
+    addConstraint(c: Constraint): void {
+                this.constraints.push(c);
+    }
+
 
     // e.g. world.setGravity(new Vector2(0, 500)) for "down" in canvas coordinates.
     // Off by default so existing scenes are unaffected.
@@ -27,6 +33,7 @@ export class World {
 
     update(dt: number): void {
         // continuous forces (springs) apply before integration, same as gravity
+        for (const c of this.constraints) c.applyForce?.();
 
         for (const obj of this.objects) {
             const body = obj.getBody();
@@ -49,12 +56,29 @@ export class World {
                 if (info) resolveCollision(obj, wall, info);
             }
         }
+        
+        for (const c of this.constraints) c.applyCorrection?.(dt);
     }
 
     render(ctx: CanvasRenderingContext2D): void {
         for (const wall of this.walls) wall.render(ctx);
+        for (const c of this.constraints) c.render(ctx);
         
         const sorted = [...this.objects].sort((a, b) => a.getZIndex() - b.getZIndex());
         for (const obj of sorted) obj.render(ctx);
+    }
+
+    pickObjectAt(point: Vector2): SimObject | null {
+        for (let i = this.objects.length - 1; i >= 0; i--) {
+            const obj = this.objects[i];
+            if (obj.getBody().isStatic()) continue;
+            if (obj.containsPoint(point)) return obj;
+        }
+        return null;
+    }
+
+    removeConstraint(c: Constraint): void {
+        const idx = this.constraints.indexOf(c);
+        if (idx !== -1) this.constraints.splice(idx, 1);
     }
 }

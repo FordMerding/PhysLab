@@ -1,5 +1,6 @@
+import { cross } from "./dynamics.ts";
 import { PhysicsBody } from "./physicsBody";
-import { type Collider } from "./collider";
+import { type Collider, CircleCollider, PolygonCollider } from "./collider";
 import { Vector2 } from "./vector";
 import { Layers } from "./layers.ts";
 
@@ -82,4 +83,30 @@ export abstract class SimObject {
     }
 
     abstract render(ctx: CanvasRenderingContext2D): void;
+
+    containsPoint(point: Vector2): boolean {
+        if (this.collider.type === "circle") {
+            const radius = (this.collider as CircleCollider).radius;
+            return this.body.getPos().distanceTo(point) <= radius;
+        }
+        if (this.collider.type === "polygon") {
+            const verts = (this.collider as PolygonCollider).getWorldVertices(
+                this.body.getPos(),
+                this.body.getRotation()
+            );
+            // convex-polygon test: point is inside if it's on the same side of every edge
+            let sign = 0;
+            for (let i = 0; i < verts.length; i++) {
+                const a = verts[i];
+                const b = verts[(i + 1) % verts.length];
+                const c = cross(b.sub(a), point.sub(a));
+                if (c !== 0) {
+                    if (sign === 0) sign = Math.sign(c);
+                    else if (Math.sign(c) !== sign) return false;
+                }
+            }
+            return true;
+        }
+        return false; // planes/walls aren't grabbable
+    }
 }
