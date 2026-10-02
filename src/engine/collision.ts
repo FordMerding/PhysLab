@@ -1,263 +1,180 @@
-import { Vector2 } from "./vector";
-import { SimObject } from "./simObject";
-import { CircleCollider, PolygonCollider, PlaneCollider } from "./collider";
-import { cross, pointVelocity, applyImpulseAtPoint } from "./dynamics";
+import { Vec2 } from "./vec2";
+import type { Body } from "./body";
+import type { CircleShape, PlaneShape } from "./shapes";
+import { LINEAR_SLOP, SPECULATIVE_MARGIN } from "./config";
 
-export interface CollisionInfo {
-    // points from object A toward object B
-    normal: Vector2;
-    // how far the two shapes overlap along `normal`
+export interface ContactPoint {
+    point: Vec2;
     depth: number;
-    // approximate world-space point where the two shapes touch - needed to know how
-    // much torque an impact applies (an off-center hit spins things, a dead-center one doesn't)
-    point: Vector2;
+    id: number; // stable feature id, used to carry impulses between frames
 }
 
-function average(vertices: Vector2[]): Vector2 {
-    return vertices.reduce((sum, v) => sum.add(v), new Vector2(0, 0)).div(vertices.length);
+export interface CollisionResult {
+    normal: Vec2; // points from a to b
+    points: ContactPoint[];
 }
 
-// --- circle vs circle ---
-function circleVsCircle(posA: Vector2, rA: number, posB: Vector2, rB: number): CollisionInfo | null {
-    const delta = posB.sub(posA);
-    const dist = delta.length();
-    const overlap = rA + rB - dist;
-    if (overlap <= 0) return null;
-    const normal = dist === 0 ? new Vector2(1, 0) : delta.normalize();
-    const point = posA.add(normal.mult(rA)); // on A's surface, facing B
-    return { normal, depth: overlap, point };
+function flip(r: CollisionResult | null): CollisionResult | null {
+    return r && { normal: r.normal.neg(), points: r.points };
 }
 
-// --- circle vs plane (world border) ---
-function circleVsPlane(pos: Vector2, radius: number, plane: PlaneCollider): CollisionInfo | null {
-    const dist = pos.sub(plane.point).dot(plane.normal);
-    const overlap = radius - dist;
-    if (overlap <= 0) return null;
-    const point = pos.sub(plane.normal.mult(radius)); // on the circle's surface, facing the wall
-    return { normal: plane.normal.mult(-1), depth: overlap, point };
+function outwardNormals(v: readonly Vec2[]): Vec2[] {
+    return v.map((a, i) => {
+        const e = v[(i + 1) % v.length].sub(a);
+        return new Vec2(e.y, -e.x).normalize();
+    });
 }
 
-// --- convex polygon vs plane ---
-function polygonVsPlane(vertices: Vector2[], plane: PlaneCollider): CollisionInfo | null {
-    let minDist = Infinity;
-    let contact = vertices[0];
-    for (const v of vertices) {
-        const d = v.sub(plane.point).dot(plane.normal);
-        if (d < minDist) {
-            minDist = d;
-            contact = v;
-        }
-    }
-    if (minDist >= 0) return null;
-    return { normal: plane.normal.mult(-1), depth: -minDist, point: contact };
-}
+// normal points from the body toward the plane
+function vsPlane(body: Body, plane: PlaneShape): CollisionResult | null {
+    const normal = plane.normal.neg();
+    const s = body.shape;
 
-// --- convex polygon vs convex polygon (SAT) ---
-function polygonVsPolygon(vertsA: Vector2[], vertsB: Vector2[]): CollisionInfo | null {
-    const candidates = [
-        ...PolygonCollider.getEdgeNormals(vertsA).map((axis) => ({ axis, fromA: true })),
-        ...PolygonCollider.getEdgeNormals(vertsB).map((axis) => ({ axis, fromA: false })),
-    ];
-
-    let minOverlap = Infinity;
-    let smallestAxis: Vector2 | null = null;
-    let axisFromA = true;
-
-    for (const { axis, fromA } of candidates) {
-        let aMin = Infinity, aMax = -Infinity, bMin = Infinity, bMax = -Infinity;
-        for (const v of vertsA) {
-            const p = v.dot(axis);
-            aMin = Math.min(aMin, p);
-            aMax = Math.max(aMax, p);
-        }
-        for (const v of vertsB) {
-            const p = v.dot(axis);
-            bMin = Math.min(bMin, p);
-            bMax = Math.max(bMax, p);
-        }
-        const overlap = Math.min(aMax, bMax) - Math.max(aMin, bMin);
-        if (overlap <= 0) return null; // separating axis found
-        if (overlap < minOverlap) {
-            minOverlap = overlap;
-            smallestAxis = axis;
-            axisFromA = fromA;
-        }
-    }
-    if (!smallestAxis) return null;
-
-    const normal = average(vertsB).sub(average(vertsA)).dot(smallestAxis) < 0 ? smallestAxis.mult(-1) : smallestAxis;
-
-    // Approximate contact point: the "incident" polygon's (the one whose FACE didn't win)
-    // vertex that penetrates deepest along the normal. This is a single-point simplification
-    // of the standard clipped 2-point manifold - good enough for this engine; it can look
-    // slightly off for a perfectly flush box-on-box edge contact, but is stable and simple.
-    const incidentVerts = axisFromA ? vertsB : vertsA;
-    let contactPoint = incidentVerts[0];
-    let minProj = contactPoint.dot(normal);
-    for (const v of incidentVerts) {
-        const p = v.dot(normal);
-        if (p < minProj) {
-            minProj = p;
-            contactPoint = v;
-        }
+    if (s.type === "circle") {
+        const depth = s.radius - (plane.normal.dot(body.pos) - plane.offset);
+        if (depth <= -SPECULATIVE_MARGIN) return null;
+        return { normal, points: [{ point: body.pos.add(normal.mul(s.radius)), depth, id: 0 }] };
     }
 
-    return { normal, depth: minOverlap, point: contactPoint };
+    const points: ContactPoint[] = [];
+    body.worldVertices().forEach((v, i) => {
+        const d = plane.normal.dot(v) - plane.offset;
+        if (d < SPECULATIVE_MARGIN) points.push({ point: v, depth: -d, id: i });
+    });
+    return points.length > 0 ? { normal, points } : null;
 }
 
-// --- circle vs convex polygon ---
-// Standard face-then-region algorithm: find the single face the circle center is most
-// outside of, then check whether the circle is closest to that face's segment or has
-// slipped past one of its two endpoints (a vertex region).
-function circleVsPolygon(circlePos: Vector2, radius: number, verts: Vector2[]): CollisionInfo | null {
-    const center = average(verts);
+function circleCircle(a: Body, ra: number, b: Body, rb: number): CollisionResult | null {
+    const d = b.pos.sub(a.pos);
+    const dist = d.len();
+    const depth = ra + rb - dist;
+    if (depth <= -SPECULATIVE_MARGIN) return null;
+    const normal = dist > 1e-9 ? d.div(dist) : new Vec2(1, 0);
+    return { normal, points: [{ point: a.pos.add(normal.mul(ra)), depth, id: 0 }] };
+}
 
-    let bestSeparation = -Infinity;
-    let bestIndex = -1;
-    const outwardNormals: Vector2[] = [];
+// normal points from the circle to the polygon
+function circlePolygon(cb: Body, c: CircleShape, pb: Body): CollisionResult | null {
+    const verts = pb.worldVertices();
+    const normals = outwardNormals(verts);
+    const center = cb.pos;
 
+    let best = -Infinity;
+    let idx = 0;
     for (let i = 0; i < verts.length; i++) {
-        const a = verts[i];
-        const b = verts[(i + 1) % verts.length];
-        let n = b.sub(a).perp().normalize();
-        if (n.dot(center.sub(a)) > 0) n = n.mult(-1); // force outward, regardless of winding order
-        outwardNormals.push(n);
-
-        const separation = circlePos.sub(a).dot(n);
-        if (separation > bestSeparation) {
-            bestSeparation = separation;
-            bestIndex = i;
+        const s = center.sub(verts[i]).dot(normals[i]);
+        if (s > best) {
+            best = s;
+            idx = i;
         }
     }
-    if (bestSeparation >= radius) return null;
+    if (best > c.radius + SPECULATIVE_MARGIN) return null;
 
-    const v1 = verts[bestIndex];
-    const v2 = verts[(bestIndex + 1) % verts.length];
-    const faceNormal = outwardNormals[bestIndex];
+    const n = normals[idx];
+    const v1 = verts[idx];
+    const v2 = verts[(idx + 1) % verts.length];
+    const onFace = (): CollisionResult => ({
+        normal: n.neg(),
+        points: [{ point: center.sub(n.mul(best)), depth: c.radius - best, id: 0 }],
+    });
+    const onVertex = (v: Vec2, id: number): CollisionResult | null => {
+        const d = center.dist(v);
+        if (d > c.radius + SPECULATIVE_MARGIN) return null;
+        const normal = d > 1e-9 ? v.sub(center).div(d) : n.neg();
+        return { normal, points: [{ point: v, depth: c.radius - d, id }] };
+    };
 
-    if (bestSeparation < 0) {
-        // circle center is inside the polygon: push it out along the least-penetrated face
-        const point = circlePos.sub(faceNormal.mult(bestSeparation));
-        return { normal: faceNormal.mult(-1), depth: radius - bestSeparation, point };
-    }
-
-    const edgeDir = v2.sub(v1).normalize();
-    const u1 = circlePos.sub(v1).dot(edgeDir);
-    const u2 = circlePos.sub(v2).dot(edgeDir.mult(-1));
-
-    if (u1 <= 0) {
-        const dist = circlePos.distanceTo(v1);
-        if (dist > radius) return null;
-        return { normal: v1.sub(circlePos).normalize(), depth: radius - dist, point: v1 };
-    }
-    if (u2 <= 0) {
-        const dist = circlePos.distanceTo(v2);
-        if (dist > radius) return null;
-        return { normal: v2.sub(circlePos).normalize(), depth: radius - dist, point: v2 };
-    }
-    const point = circlePos.sub(faceNormal.mult(bestSeparation));
-    return { normal: faceNormal.mult(-1), depth: radius - bestSeparation, point };
+    if (best < 0) return onFace();
+    const e = v2.sub(v1);
+    if (center.sub(v1).dot(e) <= 0) return onVertex(v1, 1);
+    if (center.sub(v2).dot(e) >= 0) return onVertex(v2, 2);
+    return onFace();
 }
 
-function flip(info: CollisionInfo | null): CollisionInfo | null {
-    return info ? { normal: info.normal.mult(-1), depth: info.depth, point: info.point } : null;
+function maxSeparation(va: Vec2[], na: Vec2[], vb: Vec2[]): { sep: number; edge: number } {
+    let sep = -Infinity;
+    let edge = 0;
+    for (let i = 0; i < va.length; i++) {
+        let min = Infinity;
+        for (const p of vb) min = Math.min(min, na[i].dot(p.sub(va[i])));
+        if (min > sep) {
+            sep = min;
+            edge = i;
+        }
+    }
+    return { sep, edge };
 }
 
-// dispatches to the right narrow-phase test based on each object's collider type.
-export function testCollision(a: SimObject, b: SimObject): CollisionInfo | null {
-    const colA = a.getCollider();
-    const colB = b.getCollider();
-
-    if (colA.type === "circle" && colB.type === "circle") {
-        return circleVsCircle(a.getPos(), (colA as CircleCollider).radius, b.getPos(), (colB as CircleCollider).radius);
-    }
-    if (colA.type === "circle" && colB.type === "plane") {
-        return circleVsPlane(a.getPos(), (colA as CircleCollider).radius, colB as PlaneCollider);
-    }
-    if (colA.type === "plane" && colB.type === "circle") {
-        return flip(circleVsPlane(b.getPos(), (colB as CircleCollider).radius, colA as PlaneCollider));
-    }
-    if (colA.type === "polygon" && colB.type === "polygon") {
-        const vertsA = (colA as PolygonCollider).getWorldVertices(a.getPos(), a.getBody().getRotation());
-        const vertsB = (colB as PolygonCollider).getWorldVertices(b.getPos(), b.getBody().getRotation());
-        return polygonVsPolygon(vertsA, vertsB);
-    }
-    if (colA.type === "polygon" && colB.type === "plane") {
-        const verts = (colA as PolygonCollider).getWorldVertices(a.getPos(), a.getBody().getRotation());
-        return polygonVsPlane(verts, colB as PlaneCollider);
-    }
-    if (colA.type === "plane" && colB.type === "polygon") {
-        const verts = (colB as PolygonCollider).getWorldVertices(b.getPos(), b.getBody().getRotation());
-        return flip(polygonVsPlane(verts, colA as PlaneCollider));
-    }
-    if (colA.type === "circle" && colB.type === "polygon") {
-        const verts = (colB as PolygonCollider).getWorldVertices(b.getPos(), b.getBody().getRotation());
-        return circleVsPolygon(a.getPos(), (colA as CircleCollider).radius, verts);
-    }
-    if (colA.type === "polygon" && colB.type === "circle") {
-        const verts = (colA as PolygonCollider).getWorldVertices(a.getPos(), a.getBody().getRotation());
-        return flip(circleVsPolygon(b.getPos(), (colB as CircleCollider).radius, verts));
-    }
-    return null;
+// keeps the part of segment pts where dot(n, p) <= c, preserving point order
+function clip(pts: Vec2[], n: Vec2, c: number): Vec2[] {
+    const d0 = n.dot(pts[0]) - c;
+    const d1 = n.dot(pts[1]) - c;
+    const out: Vec2[] = [];
+    if (d0 <= 0) out.push(pts[0]);
+    if (d0 * d1 < 0) out.push(pts[0].add(pts[1].sub(pts[0]).mul(d0 / (d0 - d1))));
+    if (d1 <= 0) out.push(pts[1]);
+    return out;
 }
 
-// full rigid-body impulse resolution: linear + angular response, Coulomb friction, and
-// positional de-penetration. `info.point` is what makes the angular part possible - the
-// torque an impact applies is proportional to how far the contact point is from each
-// body's center (that's the r × impulse term below).
-export function resolveCollision(a: SimObject, b: SimObject, info: CollisionInfo): void {
-    const bodyA = a.getBody();
-    const bodyB = b.getBody();
+function polygonPolygon(a: Body, b: Body): CollisionResult | null {
+    const va = a.worldVertices();
+    const vb = b.worldVertices();
+    const na = outwardNormals(va);
+    const nb = outwardNormals(vb);
 
-    const invMassA = bodyA.getInvMass();
-    const invMassB = bodyB.getInvMass();
-    const invIA = bodyA.getInvInertia();
-    const invIB = bodyB.getInvInertia();
-    if (invMassA === 0 && invMassB === 0) return;
+    const sa = maxSeparation(va, na, vb);
+    if (sa.sep > SPECULATIVE_MARGIN) return null;
+    const sb = maxSeparation(vb, nb, va);
+    if (sb.sep > SPECULATIVE_MARGIN) return null;
 
-    const rA = info.point.sub(bodyA.getPos());
-    const rB = info.point.sub(bodyB.getPos());
+    const refIsB = sb.sep > sa.sep + 0.1 * LINEAR_SLOP;
+    const refV = refIsB ? vb : va;
+    const incV = refIsB ? va : vb;
+    const incN = refIsB ? na : nb;
+    const edge = refIsB ? sb.edge : sa.edge;
+    const normal = (refIsB ? nb : na)[edge];
 
-    const relVel = pointVelocity(bodyB, rB).sub(pointVelocity(bodyA, rA));
-    const velAlongNormal = relVel.dot(info.normal);
-    if (velAlongNormal > 0) return; // already separating
-
-    const restitution = Math.min(a.getRestitution(), b.getRestitution());
-
-    const rACrossN = cross(rA, info.normal);
-    const rBCrossN = cross(rB, info.normal);
-    const normalDenom = invMassA + invMassB + rACrossN * rACrossN * invIA + rBCrossN * rBCrossN * invIB;
-
-    const j = (-(1 + restitution) * velAlongNormal) / normalDenom;
-    const impulse = info.normal.mult(j);
-    applyImpulseAtPoint(bodyA, bodyB, rA, rB, impulse);
-
-    // Coulomb friction along the tangent, computed AFTER the normal impulse (standard
-    // sequential-impulse order). This is what actually turns sliding into rolling.
-    const tangent = info.normal.perp();
-    const relVelAfterNormal = pointVelocity(bodyB, rB).sub(pointVelocity(bodyA, rA));
-    const velAlongTangent = relVelAfterNormal.dot(tangent);
-
-    const rACrossT = cross(rA, tangent);
-    const rBCrossT = cross(rB, tangent);
-    const tangentDenom = invMassA + invMassB + rACrossT * rACrossT * invIA + rBCrossT * rBCrossT * invIB;
-
-    if (tangentDenom > 0) {
-        const friction = Math.sqrt(a.getFriction() * b.getFriction());
-        let jt = -velAlongTangent / tangentDenom;
-        const maxFriction = friction * Math.abs(j);
-        jt = Math.max(-maxFriction, Math.min(maxFriction, jt)); // Coulomb's cone, clamped
-
-        const frictionImpulse = tangent.mult(jt);
-        applyImpulseAtPoint(bodyA, bodyB, rA, rB, frictionImpulse);
+    let inc = 0;
+    let minDot = Infinity;
+    for (let i = 0; i < incN.length; i++) {
+        const d = normal.dot(incN[i]);
+        if (d < minDot) {
+            minDot = d;
+            inc = i;
+        }
     }
 
-    // positional correction (linear only - rotation isn't corrected positionally, just
-    // like before; this only prevents slow sinking, it doesn't need to be exact)
-    const percent = 0.8;
-    const slop = 0.01;
-    const correctionMag = (Math.max(info.depth - slop, 0) / (invMassA + invMassB)) * percent;
-    const correction = info.normal.mult(correctionMag);
-    bodyA.setPos(bodyA.getPos().sub(correction.mult(invMassA)));
-    bodyB.setPos(bodyB.getPos().add(correction.mult(invMassB)));
+    const v1 = refV[edge];
+    const v2 = refV[(edge + 1) % refV.length];
+    const tangent = v2.sub(v1).normalize();
+
+    let pts = [incV[inc], incV[(inc + 1) % incV.length]];
+    pts = clip(pts, tangent.neg(), -tangent.dot(v1));
+    if (pts.length < 2) return null;
+    pts = clip(pts, tangent, tangent.dot(v2));
+    if (pts.length < 2) return null;
+
+    const points: ContactPoint[] = [];
+    pts.forEach((p, k) => {
+        const sep = normal.dot(p.sub(v1));
+        if (sep <= SPECULATIVE_MARGIN) points.push({ point: p, depth: -sep, id: (refIsB ? 1000 : 0) + edge * 2 + k });
+    });
+    if (points.length === 0) return null;
+
+    return { normal: refIsB ? normal.neg() : normal, points };
+}
+
+export function collide(a: Body, b: Body): CollisionResult | null {
+    const sa = a.shape;
+    const sb = b.shape;
+
+    if (sa.type === "plane") return sb.type === "plane" ? null : flip(vsPlane(b, sa));
+    if (sb.type === "plane") return vsPlane(a, sb);
+
+    if (sa.type === "circle") {
+        if (sb.type === "circle") return circleCircle(a, sa.radius, b, sb.radius);
+        return circlePolygon(a, sa, b);
+    }
+    if (sb.type === "circle") return flip(circlePolygon(b, sb, a));
+    return polygonPolygon(a, b);
 }
