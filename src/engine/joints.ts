@@ -1,13 +1,16 @@
 import { Vec2 } from "./vec2";
 import { Body } from "./body";
 import { circle } from "./shapes";
-import { BAUMGARTE } from "./config";
+import { MAX_POSITION_CORRECTION } from "./config";
 
+// Joints correct drift in two separate places: `solve` works on velocities only, and
+// `correctPosition` moves bodies directly without touching their velocity. Turning drift
+// into velocity (Baumgarte) pumps energy into chains and makes ropes buzz.
 export abstract class Joint {
     color = "#888888";
     dashed = false;
     visible = true;
-    lineWidth = 2;
+    lineWidth = 0; // meters; 0 draws a thin line of constant screen width
 
     protected readonly a: Body;
     protected readonly b: Body;
@@ -23,6 +26,10 @@ export abstract class Joint {
         this.localB = localB;
     }
 
+    connects(): [Body, Body] {
+        return [this.a, this.b];
+    }
+
     anchors(): [Vec2, Vec2] {
         return [this.a.toWorld(this.localA), this.b.toWorld(this.localB)];
     }
@@ -30,6 +37,7 @@ export abstract class Joint {
     abstract prepare(dt: number): void;
     abstract warmStart(): void;
     abstract solve(): void;
+    correctPosition(): void {}
 }
 
 // Shared 1D constraint along the line between the two anchors.
@@ -77,7 +85,7 @@ export class DistanceJoint extends AxisJoint {
     private readonly length: number;
     private readonly mode: "fixed" | "max" | "min";
     private mass = 0;
-    private bias = 0;
+    private slack = 0;
 
     constructor(a: Body, b: Body, o: DistanceJointOptions) {
         super(a, b, o.localA, o.localB);
@@ -85,21 +93,37 @@ export class DistanceJoint extends AxisJoint {
         this.mode = o.mode ?? "fixed";
     }
 
+    private error(): number {
+        const c = this.dist - this.length;
+        if (this.mode === "max") return Math.max(c, 0);
+        if (this.mode === "min") return Math.min(c, 0);
+        return c;
+    }
+
     prepare(dt: number): void {
         this.measure();
         this.mass = this.k > 0 ? 1 / this.k : 0;
-        const c = this.dist - this.length;
-        const violated = this.mode === "fixed" || (this.mode === "max" ? c > 0 : c < 0);
-        this.bias = violated ? (c * BAUMGARTE) / dt : c / dt;
+        // not at its limit yet: let the bodies approach until the limit is exactly reached
+        this.slack = this.error() === 0 && this.mode !== "fixed" ? (this.dist - this.length) / dt : 0;
     }
 
     solve(): void {
         const old = this.acc;
-        let next = old - this.mass * (this.relSpeed() + this.bias);
+        let next = old - this.mass * (this.relSpeed() + this.slack);
         if (this.mode === "max") next = Math.min(0, next);
         else if (this.mode === "min") next = Math.max(0, next);
         this.acc = next;
         this.applyAxis(next - old);
+    }
+
+    override correctPosition(): void {
+        this.measure();
+        const c = this.error();
+        if (c === 0 || this.k === 0) return;
+        const clamped = Math.max(-MAX_POSITION_CORRECTION, Math.min(MAX_POSITION_CORRECTION, c));
+        const shift = this.n.mul(-clamped / this.k);
+        this.a.applyPositionShift(shift.neg(), this.rA);
+        this.b.applyPositionShift(shift, this.rB);
     }
 }
 
@@ -170,27 +194,31 @@ export class PinJoint extends Joint {
         return Infinity;
     }
 
+    private matrix(rA: Vec2, rB: Vec2, extra: number): [number, number, number] {
+        const { a, b } = this;
+        const m = a.invMass + b.invMass;
+        return [
+            m + a.invInertia * rA.y * rA.y + b.invInertia * rB.y * rB.y + extra,
+            -a.invInertia * rA.x * rA.y - b.invInertia * rB.x * rB.y,
+            m + a.invInertia * rA.x * rA.x + b.invInertia * rB.x * rB.x + extra,
+        ];
+    }
+
     prepare(dt: number): void {
         const [pA, pB] = this.anchors();
         this.rA = pA.sub(this.a.pos);
         this.rB = pB.sub(this.b.pos);
 
         const soft = this.softness();
-        let beta = BAUMGARTE / dt;
         this.gamma = 0;
+        this.bias = Vec2.ZERO;
         if (soft) {
             const g = dt * (soft.c + dt * soft.k);
             this.gamma = g > 0 ? 1 / g : 0;
-            beta = dt * soft.k * this.gamma;
+            this.bias = pB.sub(pA).mul(dt * soft.k * this.gamma);
         }
         this.limit = this.impulseLimit(dt);
-        this.bias = pB.sub(pA).mul(beta);
-
-        const { a, b, rA, rB } = this;
-        const m = a.invMass + b.invMass;
-        this.k00 = m + a.invInertia * rA.y * rA.y + b.invInertia * rB.y * rB.y + this.gamma;
-        this.k01 = -a.invInertia * rA.x * rA.y - b.invInertia * rB.x * rB.y;
-        this.k11 = m + a.invInertia * rA.x * rA.x + b.invInertia * rB.x * rB.x + this.gamma;
+        [this.k00, this.k01, this.k11] = this.matrix(this.rA, this.rB, this.gamma);
     }
 
     private applyPoint(p: Vec2): void {
@@ -220,25 +248,44 @@ export class PinJoint extends Joint {
         this.acc = next;
         this.applyPoint(next.sub(old));
     }
+
+    override correctPosition(): void {
+        if (this.softness() !== null) return;
+        const [pA, pB] = this.anchors();
+        const rA = pA.sub(this.a.pos);
+        const rB = pB.sub(this.b.pos);
+        const [k00, k01, k11] = this.matrix(rA, rB, 0);
+        const det = k00 * k11 - k01 * k01;
+        if (det === 0) return;
+
+        let err = pB.sub(pA);
+        const len = err.len();
+        if (len > MAX_POSITION_CORRECTION) err = err.mul(MAX_POSITION_CORRECTION / len);
+        const shift = new Vec2((-k11 * err.x + k01 * err.y) / det, (k01 * err.x - k00 * err.y) / det);
+        this.a.applyPositionShift(shift.neg(), rA);
+        this.b.applyPositionShift(shift, rB);
+    }
 }
 
 const MOUSE_ANGULAR_DAMPING = 4;
 
-// Soft pin between the cursor and a grabbed body. Stiffness is per unit mass,
-// so heavy and light bodies feel the same.
+// Soft pin between the cursor and a grabbed body. Stiffness is per unit mass, using the mass of
+// everything the body is jointed to (`pullMass`), so a light handle can still drag a heavy assembly.
 export class MouseJoint extends PinJoint {
     private readonly pointer: Body;
     private readonly target: Body;
     private stiffness: number;
     private readonly maxAccel: number;
+    private readonly pullMass: number;
 
-    constructor(body: Body, grabPoint: Vec2, stiffness = 400, maxAccel = 4000) {
+    constructor(body: Body, grabPoint: Vec2, stiffness = 400, maxAccel = 40, pullMass = body.mass) {
         const pointer = new Body(circle(0), { x: grabPoint.x, y: grabPoint.y, static: true });
         super(pointer, body, { localB: body.toLocal(grabPoint) });
         this.pointer = pointer;
         this.target = body;
         this.stiffness = stiffness;
         this.maxAccel = maxAccel;
+        this.pullMass = Math.max(pullMass, body.mass);
         this.color = "#3366cc";
         this.dashed = true;
     }
@@ -258,11 +305,11 @@ export class MouseJoint extends PinJoint {
     }
 
     protected override softness(): { k: number; c: number } {
-        const m = this.target.mass;
+        const m = this.pullMass;
         return { k: m * this.stiffness, c: m * 2 * Math.sqrt(this.stiffness) };
     }
 
     protected override impulseLimit(dt: number): number {
-        return this.target.mass * this.maxAccel * dt;
+        return this.pullMass * this.maxAccel * dt;
     }
 }

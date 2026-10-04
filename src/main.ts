@@ -1,27 +1,27 @@
-import { Vec2 } from "./engine/vec2";
 import { World } from "./engine/world";
+import { Camera } from "./render/camera";
 import { Renderer } from "./render/renderer";
-import { attachMouseDrag } from "./input/mouseDrag";
-import { buildPulleyDemo } from "./scenes/pulleyDemo";
-import { buildCarDemo } from "./scenes/carDemo";
-import { buildDrStonePulleyDemo } from "./scenes/DoctorStoneThingy";
+import { ViewControls } from "./input/viewcontrols.ts";
+import { Vec2 } from "./engine/vec2";
+import { scenes } from "./scenes";
 
 const canvas = document.getElementById("simulation") as HTMLCanvasElement;
-const renderer = new Renderer(canvas);
+const camera = new Camera();
+const renderer = new Renderer(canvas, camera);
 const world = new World();
-world.gravity = new Vec2(0, 500);
 
-function resize(): void {
-    renderer.resize();
-    world.addBounds(renderer.width, renderer.height);
-}
-window.addEventListener("resize", resize);
-resize();
+// pick a scene with ?scene=<index>
+const scene = scenes[Number(new URLSearchParams(location.search).get("scene") ?? 0)] ?? scenes[0];
+scene.build(world);
+camera.center = new Vec2(scene.view.x, scene.view.y);
+camera.zoom = scene.view.zoom;
 
-buildDrStonePulleyDemo(world);
-attachMouseDrag(canvas, world);
+const controls = new ViewControls(canvas, world, camera);
 
-let paused = true;
+window.addEventListener("resize", () => renderer.resize());
+renderer.resize();
+
+let paused = false;
 window.addEventListener("keydown", (e) => {
     if (e.code === "Space") paused = !paused;
 });
@@ -32,7 +32,7 @@ function frame(time: number): void {
     previous = time;
 
     if (!paused) world.step(dt);
-    renderer.draw(world);
+    renderer.draw(world, controls.selected);
     requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

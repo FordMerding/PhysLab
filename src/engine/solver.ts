@@ -11,7 +11,9 @@ export interface Contact {
     rB: Vec2;
     normalMass: number;
     tangentMass: number;
-    bias: number;
+    push: number; // position-error correction speed, only applied while useBias is on
+    speculative: number; // allowed approach speed for contacts that don't touch yet (<= 0)
+    approachSpeed: number; // normal velocity before solving, for restitution
     jn: number; // accumulated normal impulse
     jt: number; // accumulated tangent impulse
 }
@@ -37,7 +39,9 @@ export function createManifold(a: Body, b: Body, result: CollisionResult, prev?:
             rB: Vec2.ZERO,
             normalMass: 0,
             tangentMass: 0,
-            bias: 0,
+            push: 0,
+            speculative: 0,
+            approachSpeed: 0,
             jn: old?.jn ?? 0,
             jt: old?.jt ?? 0,
         };
@@ -73,13 +77,9 @@ export function prepareManifold(m: Manifold, dt: number): void {
         c.normalMass = effectiveMass(a, b, c.rA, c.rB, normal);
         c.tangentMass = effectiveMass(a, b, c.rA, c.rB, tangent);
 
-        // depth < 0 is a speculative contact: allow approaching until the shapes just touch
-        c.bias =
-            c.depth > 0
-                ? Math.min((BAUMGARTE * Math.max(c.depth - LINEAR_SLOP, 0)) / dt, MAX_PUSH_SPEED)
-                : c.depth / dt;
-        const vn = b.velocityAt(c.rB).sub(a.velocityAt(c.rA)).dot(normal);
-        if (vn < -RESTITUTION_THRESHOLD) c.bias = Math.max(c.bias, -m.restitution * vn);
+        c.push = c.depth > 0 ? Math.min((BAUMGARTE * Math.max(c.depth - LINEAR_SLOP, 0)) / dt, MAX_PUSH_SPEED) : 0;
+        c.speculative = c.depth < 0 ? c.depth / dt : 0;
+        c.approachSpeed = b.velocityAt(c.rB).sub(a.velocityAt(c.rA)).dot(normal);
     }
 }
 
@@ -87,7 +87,9 @@ export function warmStartManifold(m: Manifold): void {
     for (const c of m.contacts) apply(m, c, m.normal.mul(c.jn).add(m.tangent.mul(c.jt)));
 }
 
-export function solveManifold(m: Manifold): void {
+// useBias=false is the "relax" pass: it removes the velocity that position correction added,
+// so correcting overlap doesn't pump energy into the system.
+export function solveManifold(m: Manifold, useBias: boolean): void {
     const { a, b, normal, tangent } = m;
 
     for (const c of m.contacts) {
@@ -100,8 +102,20 @@ export function solveManifold(m: Manifold): void {
 
     for (const c of m.contacts) {
         const vn = b.velocityAt(c.rB).sub(a.velocityAt(c.rA)).dot(normal);
-        const next = Math.max(0, c.jn + c.normalMass * (-vn + c.bias));
+        const bias = c.speculative + (useBias ? c.push : 0);
+        const next = Math.max(0, c.jn + c.normalMass * (-vn + bias));
         apply(m, c, normal.mul(next - c.jn));
+        c.jn = next;
+    }
+}
+
+export function applyRestitution(m: Manifold): void {
+    if (m.restitution === 0) return;
+    for (const c of m.contacts) {
+        if (c.approachSpeed > -RESTITUTION_THRESHOLD) continue;
+        const vn = m.b.velocityAt(c.rB).sub(m.a.velocityAt(c.rA)).dot(m.normal);
+        const next = Math.max(0, c.jn + c.normalMass * (-vn - m.restitution * c.approachSpeed));
+        apply(m, c, m.normal.mul(next - c.jn));
         c.jn = next;
     }
 }

@@ -1,28 +1,59 @@
 import { Vec2 } from "./vec2";
 import { Body } from "./body";
 import { circle } from "./shapes";
-import { DistanceJoint, PinJoint, type Joint } from "./joints";
+import { DistanceJoint, Joint, PinJoint } from "./joints";
 import { ALL_LAYERS, ROPE_LAYER } from "./filter";
 import type { World } from "./world";
 
 export interface RopeOptions {
-    radius?: number;
-    spacing?: number; // distance between nodes along the rope
-    nodeMass?: number;
+    radius?: number; // m
+    spacing?: number; // m, distance between nodes along the rope
+    nodeMass?: number; // kg
     friction?: number;
+    damping?: number; // 1/s, internal damping between neighbouring nodes (calms the rope without slowing its fall)
     color?: string;
 }
 
 // A chain of small circles joined by max-distance links: inextensible, free to go slack,
 // and it collides with everything except other rope nodes (see ROPE_LAYER).
 // To keep a body from fighting its own pin, give it mask: ALL_LAYERS & ~ROPE_LAYER.
+// Damps the relative velocity of neighbouring nodes, so zig-zag motion dies out
+// while the rope as a whole still swings and falls freely.
+class NodeDamper extends Joint {
+    private readonly nodes: readonly Body[];
+    private readonly rate: number;
+
+    constructor(nodes: readonly Body[], rate: number) {
+        super(nodes[0], nodes[1]);
+        this.nodes = nodes;
+        this.rate = rate;
+        this.visible = false;
+    }
+
+    prepare(dt: number): void {
+        const k = 1 - Math.exp(-this.rate * dt);
+        for (let i = 0; i < this.nodes.length - 1; i++) {
+            const a = this.nodes[i];
+            const b = this.nodes[i + 1];
+            const w = a.invMass + b.invMass;
+            if (w === 0) continue;
+            const j = b.vel.sub(a.vel).mul(k / w);
+            a.vel = a.vel.add(j.mul(a.invMass));
+            b.vel = b.vel.sub(j.mul(b.invMass));
+        }
+    }
+
+    warmStart(): void {}
+    solve(): void {}
+}
+
 export class Rope {
     readonly nodes: Body[] = [];
     readonly joints: Joint[] = [];
     private readonly restLength: number;
 
     constructor(path: readonly Vec2[], o: RopeOptions = {}) {
-        const radius = o.radius ?? 4;
+        const radius = o.radius ?? 0.04;
         const spacing = o.spacing ?? radius * 2;
         const color = o.color ?? "#c9a227";
 
@@ -38,7 +69,7 @@ export class Rope {
                 new Body(circle(radius), {
                     x: p.x,
                     y: p.y,
-                    mass: o.nodeMass ?? 0.2,
+                    mass: o.nodeMass ?? 0.05,
                     friction: o.friction ?? 0.02,
                     restitution: 0,
                     category: ROPE_LAYER,
@@ -55,6 +86,7 @@ export class Rope {
             link.lineWidth = radius * 2;
             this.joints.push(link);
         }
+        if (this.nodes.length > 1) this.joints.push(new NodeDamper(this.nodes, o.damping ?? 50));
     }
 
     // `local` is the attachment point in the body's own frame; it should coincide with the rope end.

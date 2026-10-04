@@ -15,6 +15,8 @@ export interface BodyOptions {
     color?: string;
     z?: number;
     visible?: boolean;
+    linearDamping?: number; // 1/s, velocity drag
+    angularDamping?: number;
 }
 
 export interface Aabb {
@@ -47,6 +49,8 @@ export class Body {
     color: string;
     z: number;
     visible: boolean;
+    linearDamping: number;
+    angularDamping: number;
 
     private force: Vec2 = Vec2.ZERO;
     private torque = 0;
@@ -74,6 +78,8 @@ export class Body {
         this.color = o.color ?? "#888888";
         this.z = o.z ?? 0;
         this.visible = o.visible ?? true;
+        this.linearDamping = o.linearDamping ?? 0;
+        this.angularDamping = o.angularDamping ?? 0;
     }
 
     toWorld(local: Vec2): Vec2 {
@@ -95,6 +101,13 @@ export class Body {
         this.angVel += this.invInertia * r.cross(impulse);
     }
 
+    // Moves the body directly (no velocity change); used by position-correction passes.
+    applyPositionShift(shift: Vec2, r: Vec2): void {
+        if (this.invMass === 0) return;
+        this.pos = this.pos.add(shift.mul(this.invMass));
+        this.angle += this.invInertia * r.cross(shift);
+    }
+
     applyForce(force: Vec2, worldPoint?: Vec2): void {
         if (this.isStatic) return;
         this.force = this.force.add(force);
@@ -105,6 +118,8 @@ export class Body {
         if (this.isStatic) return;
         this.vel = this.vel.add(gravity.add(this.force.mul(this.invMass)).mul(dt));
         this.angVel += this.torque * this.invInertia * dt;
+        this.vel = this.vel.div(1 + dt * this.linearDamping);
+        this.angVel /= 1 + dt * this.angularDamping;
         this.force = Vec2.ZERO;
         this.torque = 0;
     }
@@ -126,16 +141,18 @@ export class Body {
         return this.vertexCache;
     }
 
-    contains(point: Vec2): boolean {
+    // `margin` grows the shape (in meters) so thin things are easier to pick.
+    contains(point: Vec2, margin = 0): boolean {
         const s = this.shape;
-        if (s.type === "circle") return point.dist(this.pos) <= s.radius;
+        if (s.type === "circle") return point.dist(this.pos) <= s.radius + margin;
         if (s.type === "polygon") {
             const local = this.toLocal(point);
             const v = s.vertices;
             for (let i = 0; i < v.length; i++) {
                 const a = v[i];
                 const b = v[(i + 1) % v.length];
-                if (b.sub(a).cross(local.sub(a)) < 0) return false;
+                const e = b.sub(a);
+                if (e.cross(local.sub(a)) < -margin * e.len()) return false;
             }
             return true;
         }
