@@ -19,7 +19,7 @@ function build(world: World): void {
     world.setBounds({ floor: 0 });
     const free = ALL_LAYERS & ~ROPE_LAYER;
 
-    const ceilingY = 7.4;
+    const ceilingY = 15;
     const movable1 = new Vec2(4.25, 3.9);
     const movable2 = new Vec2(4.5, 2.5);
     const movable3 = new Vec2(4.75, 1.5);
@@ -27,7 +27,7 @@ function build(world: World): void {
     const hook1 = new Vec2(movable1.x + TRACK, ceilingY);
     const hook2 = new Vec2(movable2.x + TRACK, ceilingY);
     const hook3 = new Vec2(movable3.x + TRACK, ceilingY);
-    const handlePos = new Vec2(fixed.x - TRACK, 5.9);
+    const handlePos = new Vec2(fixed.x - TRACK, 10);
 
     world.addCircle({ x: fixed.x, y: fixed.y, radius: PULLEY_RADIUS, static: true, friction: 0.05, color: "#666666" });
     const hooks = [hook1, hook2, hook3].map((h) =>

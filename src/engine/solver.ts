@@ -7,8 +7,10 @@ export interface Contact {
     point: Vec2;
     depth: number;
     id: number;
-    rA: Vec2;
-    rB: Vec2;
+    rAx: number; // contact point relative to each body's center
+    rAy: number;
+    rBx: number;
+    rBy: number;
     normalMass: number;
     tangentMass: number;
     push: number; // position-error correction speed, only applied while useBias is on
@@ -21,8 +23,10 @@ export interface Contact {
 export interface Manifold {
     a: Body;
     b: Body;
-    normal: Vec2;
-    tangent: Vec2;
+    nx: number; // normal, from a to b
+    ny: number;
+    tx: number; // tangent
+    ty: number;
     friction: number;
     restitution: number;
     contacts: Contact[];
@@ -35,8 +39,10 @@ export function createManifold(a: Body, b: Body, result: CollisionResult, prev?:
             point: p.point,
             depth: p.depth,
             id: p.id,
-            rA: Vec2.ZERO,
-            rB: Vec2.ZERO,
+            rAx: 0,
+            rAy: 0,
+            rBx: 0,
+            rBy: 0,
             normalMass: 0,
             tangentMass: 0,
             push: 0,
@@ -46,66 +52,77 @@ export function createManifold(a: Body, b: Body, result: CollisionResult, prev?:
             jt: old?.jt ?? 0,
         };
     });
+    const n = result.normal;
     return {
         a,
         b,
-        normal: result.normal,
-        tangent: result.normal.perp(),
+        nx: n.x,
+        ny: n.y,
+        tx: -n.y,
+        ty: n.x,
         friction: Math.sqrt(a.friction * b.friction),
         restitution: Math.max(a.restitution, b.restitution),
         contacts,
     };
 }
 
-function effectiveMass(a: Body, b: Body, rA: Vec2, rB: Vec2, axis: Vec2): number {
-    const cA = rA.cross(axis);
-    const cB = rB.cross(axis);
+function apply(m: Manifold, c: Contact, px: number, py: number): void {
+    m.a.applyImpulseXY(-px, -py, c.rAx, c.rAy);
+    m.b.applyImpulseXY(px, py, c.rBx, c.rBy);
+}
+
+// relative velocity of b's contact point with respect to a's, projected on (ux, uy)
+function relSpeed(m: Manifold, c: Contact, ux: number, uy: number): number {
+    const { a, b } = m;
+    const dvx = b.vx - b.angVel * c.rBy - (a.vx - a.angVel * c.rAy);
+    const dvy = b.vy + b.angVel * c.rBx - (a.vy + a.angVel * c.rAx);
+    return dvx * ux + dvy * uy;
+}
+
+function effectiveMass(a: Body, b: Body, c: Contact, ux: number, uy: number): number {
+    const cA = c.rAx * uy - c.rAy * ux;
+    const cB = c.rBx * uy - c.rBy * ux;
     const k = a.invMass + b.invMass + a.invInertia * cA * cA + b.invInertia * cB * cB;
     return k > 0 ? 1 / k : 0;
 }
 
-function apply(m: Manifold, c: Contact, impulse: Vec2): void {
-    m.a.applyImpulse(impulse.neg(), c.rA);
-    m.b.applyImpulse(impulse, c.rB);
-}
-
 export function prepareManifold(m: Manifold, dt: number): void {
-    const { a, b, normal, tangent } = m;
+    const { a, b } = m;
     for (const c of m.contacts) {
-        c.rA = c.point.sub(a.pos);
-        c.rB = c.point.sub(b.pos);
-        c.normalMass = effectiveMass(a, b, c.rA, c.rB, normal);
-        c.tangentMass = effectiveMass(a, b, c.rA, c.rB, tangent);
+        c.rAx = c.point.x - a.pos.x;
+        c.rAy = c.point.y - a.pos.y;
+        c.rBx = c.point.x - b.pos.x;
+        c.rBy = c.point.y - b.pos.y;
+        c.normalMass = effectiveMass(a, b, c, m.nx, m.ny);
+        c.tangentMass = effectiveMass(a, b, c, m.tx, m.ty);
 
         c.push = c.depth > 0 ? Math.min((BAUMGARTE * Math.max(c.depth - LINEAR_SLOP, 0)) / dt, MAX_PUSH_SPEED) : 0;
         c.speculative = c.depth < 0 ? c.depth / dt : 0;
-        c.approachSpeed = b.velocityAt(c.rB).sub(a.velocityAt(c.rA)).dot(normal);
+        c.approachSpeed = relSpeed(m, c, m.nx, m.ny);
     }
 }
 
 export function warmStartManifold(m: Manifold): void {
-    for (const c of m.contacts) apply(m, c, m.normal.mul(c.jn).add(m.tangent.mul(c.jt)));
+    for (const c of m.contacts) apply(m, c, m.nx * c.jn + m.tx * c.jt, m.ny * c.jn + m.ty * c.jt);
 }
 
 // useBias=false is the "relax" pass: it removes the velocity that position correction added,
 // so correcting overlap doesn't pump energy into the system.
 export function solveManifold(m: Manifold, useBias: boolean): void {
-    const { a, b, normal, tangent } = m;
-
     for (const c of m.contacts) {
-        const vt = b.velocityAt(c.rB).sub(a.velocityAt(c.rA)).dot(tangent);
         const maxF = m.friction * c.jn;
-        const next = Math.max(-maxF, Math.min(maxF, c.jt - c.tangentMass * vt));
-        apply(m, c, tangent.mul(next - c.jt));
+        const next = Math.max(-maxF, Math.min(maxF, c.jt - c.tangentMass * relSpeed(m, c, m.tx, m.ty)));
+        const d = next - c.jt;
         c.jt = next;
+        apply(m, c, m.tx * d, m.ty * d);
     }
 
     for (const c of m.contacts) {
-        const vn = b.velocityAt(c.rB).sub(a.velocityAt(c.rA)).dot(normal);
         const bias = c.speculative + (useBias ? c.push : 0);
-        const next = Math.max(0, c.jn + c.normalMass * (-vn + bias));
-        apply(m, c, normal.mul(next - c.jn));
+        const next = Math.max(0, c.jn + c.normalMass * (-relSpeed(m, c, m.nx, m.ny) + bias));
+        const d = next - c.jn;
         c.jn = next;
+        apply(m, c, m.nx * d, m.ny * d);
     }
 }
 
@@ -113,9 +130,9 @@ export function applyRestitution(m: Manifold): void {
     if (m.restitution === 0) return;
     for (const c of m.contacts) {
         if (c.approachSpeed > -RESTITUTION_THRESHOLD) continue;
-        const vn = m.b.velocityAt(c.rB).sub(m.a.velocityAt(c.rA)).dot(m.normal);
-        const next = Math.max(0, c.jn + c.normalMass * (-vn - m.restitution * c.approachSpeed));
-        apply(m, c, m.normal.mul(next - c.jn));
+        const next = Math.max(0, c.jn + c.normalMass * (-relSpeed(m, c, m.nx, m.ny) - m.restitution * c.approachSpeed));
+        const d = next - c.jn;
         c.jn = next;
+        apply(m, c, m.nx * d, m.ny * d);
     }
 }

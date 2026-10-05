@@ -37,9 +37,12 @@ class NodeDamper extends Joint {
             const b = this.nodes[i + 1];
             const w = a.invMass + b.invMass;
             if (w === 0) continue;
-            const j = b.vel.sub(a.vel).mul(k / w);
-            a.vel = a.vel.add(j.mul(a.invMass));
-            b.vel = b.vel.sub(j.mul(b.invMass));
+            const jx = ((b.vx - a.vx) * k) / w;
+            const jy = ((b.vy - a.vy) * k) / w;
+            a.vx += jx * a.invMass;
+            a.vy += jy * a.invMass;
+            b.vx -= jx * b.invMass;
+            b.vy -= jy * b.invMass;
         }
     }
 

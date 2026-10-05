@@ -40,33 +40,78 @@ export abstract class Joint {
     correctPosition(): void {}
 }
 
-// Shared 1D constraint along the line between the two anchors.
+// Shared 1D constraint along the line between the two anchors. Written with scalars
+// because these joints (rope links) dominate the solver's run time.
 abstract class AxisJoint extends Joint {
-    protected n: Vec2 = new Vec2(1, 0);
+    protected nx = 1;
+    protected ny = 0;
     protected dist = 0;
     protected k = 0;
     protected acc = 0;
+    private rAx = 0;
+    private rAy = 0;
+    private rBx = 0;
+    private rBy = 0;
 
     protected measure(): void {
-        const [pA, pB] = this.anchors();
-        const d = pB.sub(pA);
-        this.dist = d.len();
-        this.n = this.dist > 1e-9 ? d.div(this.dist) : new Vec2(1, 0);
-        this.rA = pA.sub(this.a.pos);
-        this.rB = pB.sub(this.b.pos);
-        const cA = this.rA.cross(this.n);
-        const cB = this.rB.cross(this.n);
-        this.k = this.a.invMass + this.b.invMass + this.a.invInertia * cA * cA + this.b.invInertia * cB * cB;
+        const a = this.a;
+        const b = this.b;
+        const lA = this.localA;
+        const lB = this.localB;
+        if (lA.x === 0 && lA.y === 0) {
+            this.rAx = 0;
+            this.rAy = 0;
+        } else {
+            const c = Math.cos(a.angle);
+            const s = Math.sin(a.angle);
+            this.rAx = lA.x * c - lA.y * s;
+            this.rAy = lA.x * s + lA.y * c;
+        }
+        if (lB.x === 0 && lB.y === 0) {
+            this.rBx = 0;
+            this.rBy = 0;
+        } else {
+            const c = Math.cos(b.angle);
+            const s = Math.sin(b.angle);
+            this.rBx = lB.x * c - lB.y * s;
+            this.rBy = lB.x * s + lB.y * c;
+        }
+
+        const dx = b.pos.x + this.rBx - (a.pos.x + this.rAx);
+        const dy = b.pos.y + this.rBy - (a.pos.y + this.rAy);
+        this.dist = Math.sqrt(dx * dx + dy * dy);
+        if (this.dist > 1e-9) {
+            this.nx = dx / this.dist;
+            this.ny = dy / this.dist;
+        } else {
+            this.nx = 1;
+            this.ny = 0;
+        }
+        const cA = this.rAx * this.ny - this.rAy * this.nx;
+        const cB = this.rBx * this.ny - this.rBy * this.nx;
+        this.k = a.invMass + b.invMass + a.invInertia * cA * cA + b.invInertia * cB * cB;
     }
 
     protected relSpeed(): number {
-        return this.b.velocityAt(this.rB).sub(this.a.velocityAt(this.rA)).dot(this.n);
+        const a = this.a;
+        const b = this.b;
+        const dvx = b.vx - b.angVel * this.rBy - (a.vx - a.angVel * this.rAy);
+        const dvy = b.vy + b.angVel * this.rBx - (a.vy + a.angVel * this.rAx);
+        return dvx * this.nx + dvy * this.ny;
     }
 
     protected applyAxis(lambda: number): void {
-        const p = this.n.mul(lambda);
-        this.a.applyImpulse(p.neg(), this.rA);
-        this.b.applyImpulse(p, this.rB);
+        const px = this.nx * lambda;
+        const py = this.ny * lambda;
+        this.a.applyImpulseXY(-px, -py, this.rAx, this.rAy);
+        this.b.applyImpulseXY(px, py, this.rBx, this.rBy);
+    }
+
+    protected shiftAlongAxis(amount: number): void {
+        const sx = this.nx * amount;
+        const sy = this.ny * amount;
+        this.a.applyPositionShiftXY(-sx, -sy, this.rAx, this.rAy);
+        this.b.applyPositionShiftXY(sx, sy, this.rBx, this.rBy);
     }
 
     warmStart(): void {
@@ -121,9 +166,7 @@ export class DistanceJoint extends AxisJoint {
         const c = this.error();
         if (c === 0 || this.k === 0) return;
         const clamped = Math.max(-MAX_POSITION_CORRECTION, Math.min(MAX_POSITION_CORRECTION, c));
-        const shift = this.n.mul(-clamped / this.k);
-        this.a.applyPositionShift(shift.neg(), this.rA);
-        this.b.applyPositionShift(shift, this.rB);
+        this.shiftAlongAxis(-clamped / this.k);
     }
 }
 

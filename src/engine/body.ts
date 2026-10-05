@@ -39,7 +39,8 @@ export class Body {
 
     pos: Vec2;
     angle: number;
-    vel: Vec2 = Vec2.ZERO;
+    vx = 0;
+    vy = 0;
     angVel = 0;
 
     restitution: number;
@@ -52,7 +53,8 @@ export class Body {
     linearDamping: number;
     angularDamping: number;
 
-    private force: Vec2 = Vec2.ZERO;
+    private fx = 0;
+    private fy = 0;
     private torque = 0;
 
     private vertexCache: Vec2[] = [];
@@ -82,6 +84,17 @@ export class Body {
         this.angularDamping = o.angularDamping ?? 0;
     }
 
+    // Velocity is stored as scalars (the solver's hot loops avoid allocating vectors);
+    // this accessor is for everything else.
+    get vel(): Vec2 {
+        return new Vec2(this.vx, this.vy);
+    }
+
+    set vel(v: Vec2) {
+        this.vx = v.x;
+        this.vy = v.y;
+    }
+
     toWorld(local: Vec2): Vec2 {
         return this.pos.add(local.rotate(this.angle));
     }
@@ -91,42 +104,58 @@ export class Body {
     }
 
     velocityAt(r: Vec2): Vec2 {
-        return new Vec2(this.vel.x - this.angVel * r.y, this.vel.y + this.angVel * r.x);
+        return new Vec2(this.vx - this.angVel * r.y, this.vy + this.angVel * r.x);
     }
 
     // `r` is the offset from the center of mass.
     applyImpulse(impulse: Vec2, r: Vec2): void {
+        this.applyImpulseXY(impulse.x, impulse.y, r.x, r.y);
+    }
+
+    applyImpulseXY(px: number, py: number, rx: number, ry: number): void {
         if (this.invMass === 0) return;
-        this.vel = this.vel.add(impulse.mul(this.invMass));
-        this.angVel += this.invInertia * r.cross(impulse);
+        this.vx += px * this.invMass;
+        this.vy += py * this.invMass;
+        this.angVel += this.invInertia * (rx * py - ry * px);
     }
 
     // Moves the body directly (no velocity change); used by position-correction passes.
     applyPositionShift(shift: Vec2, r: Vec2): void {
+        this.applyPositionShiftXY(shift.x, shift.y, r.x, r.y);
+    }
+
+    applyPositionShiftXY(sx: number, sy: number, rx: number, ry: number): void {
         if (this.invMass === 0) return;
-        this.pos = this.pos.add(shift.mul(this.invMass));
-        this.angle += this.invInertia * r.cross(shift);
+        this.pos = new Vec2(this.pos.x + sx * this.invMass, this.pos.y + sy * this.invMass);
+        this.angle += this.invInertia * (rx * sy - ry * sx);
     }
 
     applyForce(force: Vec2, worldPoint?: Vec2): void {
         if (this.isStatic) return;
-        this.force = this.force.add(force);
+        this.fx += force.x;
+        this.fy += force.y;
         if (worldPoint) this.torque += worldPoint.sub(this.pos).cross(force);
     }
 
     integrateVelocity(gravity: Vec2, dt: number): void {
         if (this.isStatic) return;
-        this.vel = this.vel.add(gravity.add(this.force.mul(this.invMass)).mul(dt));
+        this.vx += (gravity.x + this.fx * this.invMass) * dt;
+        this.vy += (gravity.y + this.fy * this.invMass) * dt;
         this.angVel += this.torque * this.invInertia * dt;
-        this.vel = this.vel.div(1 + dt * this.linearDamping);
-        this.angVel /= 1 + dt * this.angularDamping;
-        this.force = Vec2.ZERO;
+        if (this.linearDamping !== 0) {
+            const d = 1 / (1 + dt * this.linearDamping);
+            this.vx *= d;
+            this.vy *= d;
+        }
+        if (this.angularDamping !== 0) this.angVel /= 1 + dt * this.angularDamping;
+        this.fx = 0;
+        this.fy = 0;
         this.torque = 0;
     }
 
     integratePosition(dt: number): void {
         if (this.isStatic) return;
-        this.pos = this.pos.add(this.vel.mul(dt));
+        this.pos = new Vec2(this.pos.x + this.vx * dt, this.pos.y + this.vy * dt);
         this.angle += this.angVel * dt;
     }
 

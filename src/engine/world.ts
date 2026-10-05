@@ -164,49 +164,50 @@ export class World {
     }
 
     // Broad phase: bodies are bucketed into a uniform grid, and only bodies sharing a cell
-    // are tested. Unbounded bodies (planes) are tested against everything.
+    // are tested. A pair is reported in the lowest cell the two have in common, so no
+    // de-duplication set is needed. Unbounded bodies (planes) are tested against everything.
     private candidatePairs(): Array<[Body, Body]> {
         const bodies = this.bodies;
+        const n = bodies.length;
         const pairs: Array<[Body, Body]> = [];
-        const seen = new Set<number>();
-        const add = (i: number, j: number): void => {
-            const lo = Math.min(i, j);
-            const hi = Math.max(i, j);
-            const key = lo * 1048576 + hi;
-            if (seen.has(key)) return;
-            seen.add(key);
+        const x0 = new Int32Array(n);
+        const y0 = new Int32Array(n);
+        const cells = new Map<number, number[]>();
+        const unbounded: number[] = [];
+
+        const test = (lo: number, hi: number): void => {
             const a = bodies[lo];
             const b = bodies[hi];
             if (a.isStatic && b.isStatic) return;
             if (canCollide(a, b)) pairs.push([a, b]);
         };
 
-        const cells = new Map<number, number[]>();
-        const unbounded: number[] = [];
-        bodies.forEach((body, i) => {
-            const box = body.aabb();
+        for (let i = 0; i < n; i++) {
+            const box = bodies[i].aabb();
             if (!box) {
                 unbounded.push(i);
-                return;
+                continue;
             }
-            const x0 = Math.floor((box.minX - SPECULATIVE_MARGIN) / GRID_CELL);
+            x0[i] = Math.floor((box.minX - SPECULATIVE_MARGIN) / GRID_CELL);
+            y0[i] = Math.floor((box.minY - SPECULATIVE_MARGIN) / GRID_CELL);
             const x1 = Math.floor((box.maxX + SPECULATIVE_MARGIN) / GRID_CELL);
-            const y0 = Math.floor((box.minY - SPECULATIVE_MARGIN) / GRID_CELL);
             const y1 = Math.floor((box.maxY + SPECULATIVE_MARGIN) / GRID_CELL);
-            for (let x = x0; x <= x1; x++) {
-                for (let y = y0; y <= y1; y++) {
+            for (let x = x0[i]; x <= x1; x++) {
+                for (let y = y0[i]; y <= y1; y++) {
                     const key = x * 1048576 + y;
                     const cell = cells.get(key);
-                    if (cell) {
-                        for (const j of cell) add(i, j);
-                        cell.push(i);
-                    } else {
+                    if (!cell) {
                         cells.set(key, [i]);
+                        continue;
                     }
+                    for (const j of cell) {
+                        if (x === Math.max(x0[i], x0[j]) && y === Math.max(y0[i], y0[j])) test(j, i);
+                    }
+                    cell.push(i);
                 }
             }
-        });
-        for (const u of unbounded) for (let j = 0; j < bodies.length; j++) if (j !== u) add(u, j);
+        }
+        for (const u of unbounded) for (let j = 0; j < n; j++) if (j !== u) test(Math.min(u, j), Math.max(u, j));
         return pairs;
     }
 
