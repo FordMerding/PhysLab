@@ -81,3 +81,23 @@ export function inertiaPerMass(shape: Shape): number {
     }
     return sum / area;
 }
+
+export function shapeArea(shape: Shape): number {
+    if (shape.type === "circle") return Math.PI * shape.radius * shape.radius;
+    if (shape.type === "plane") return 0;
+    const v = shape.vertices;
+    let area = 0;
+    for (let i = 0; i < v.length; i++) area += v[i].cross(v[(i + 1) % v.length]) / 2;
+    return area;
+}
+
+// width and height of a polygon's local bounding box
+export function polygonSize(shape: PolygonShape): { w: number; h: number } {
+    const xs = shape.vertices.map((v) => v.x);
+    const ys = shape.vertices.map((v) => v.y);
+    return { w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+}
+
+export function scalePolygon(shape: PolygonShape, sx: number, sy: number): PolygonShape {
+    return polygon(shape.vertices.map((v) => new Vec2(v.x * sx, v.y * sy)));
+}

@@ -1,4 +1,5 @@
 import type { Body } from "../engine/body";
+import type { Rope } from "../engine/rope";
 import type { World } from "../engine/world";
 import type { Camera } from "./camera";
 
@@ -33,7 +34,7 @@ export class Renderer {
         this.camera.setViewport(w, h);
     }
 
-    draw(world: World, selected: Body | null = null): void {
+    draw(world: World, selected: Body | null = null, selectedRope: Rope | null = null): void {
         const ctx = this.ctx;
         const { camera: cam, dpr } = this;
         const z = cam.zoom;
@@ -54,6 +55,7 @@ export class Renderer {
 
         this.drawGrid();
         for (const b of world.bodies) if (b.shape.type === "plane") this.drawPlane(b);
+        if (selectedRope) this.drawRopeHighlight(selectedRope);
         this.drawJoints(world);
 
         const sorted = world.bodies.filter((b) => b.visible && b.shape.type !== "plane").sort((p, q) => p.z - q.z);
@@ -152,6 +154,15 @@ export class Renderer {
             ctx.lineTo(b.pos.x + Math.cos(b.angle) * r, b.pos.y + Math.sin(b.angle) * r);
             ctx.stroke();
         }
+    }
+
+    private drawRopeHighlight(rope: Rope): void {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "rgba(255, 213, 74, 0.45)";
+        ctx.lineWidth = rope.radius * 2 + 8 * this.px;
+        ctx.beginPath();
+        rope.nodes.forEach((n, i) => (i === 0 ? ctx.moveTo(n.pos.x, n.pos.y) : ctx.lineTo(n.pos.x, n.pos.y)));
+        ctx.stroke();
     }
 
     private drawSelection(b: Body): void {

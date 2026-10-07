@@ -11,20 +11,23 @@ const PICK_MARGIN_PX = 6;
 // Left mouse: select and drag bodies. Right/middle mouse: pan. Wheel: zoom.
 // Shift + wheel: mouse pull stiffness.
 export class ViewControls {
-    selected: Body | null = null;
     mouseStiffness = 400;
-    onSelect: (body: Body | null) => void = () => {};
 
     private readonly canvas: HTMLCanvasElement;
-    private readonly world: World;
+    private readonly source: { readonly world: World; selectBody(body: Body | null): void };
     private readonly camera: Camera;
     private joint: MouseJoint | null = null;
     private panning = false;
     private screen: Vec2 = Vec2.ZERO;
 
-    constructor(canvas: HTMLCanvasElement, world: World, camera: Camera) {
+    // `source.world` is read on every event, so the world can be swapped (scene changes)
+    constructor(
+        canvas: HTMLCanvasElement,
+        source: { readonly world: World; selectBody(body: Body | null): void },
+        camera: Camera
+    ) {
         this.canvas = canvas;
-        this.world = world;
+        this.source = source;
         this.camera = camera;
 
         canvas.addEventListener("mousedown", (e) => this.onDown(e));
@@ -34,9 +37,14 @@ export class ViewControls {
         window.addEventListener("mouseup", (e) => this.onUp(e));
     }
 
-    select(body: Body | null): void {
-        this.selected = body;
-        this.onSelect(body);
+    pointerWorld(): Vec2 {
+        return this.camera.screenToWorld(this.screen);
+    }
+
+    // forgets the grab; call when the world is replaced
+    release(): void {
+        this.joint = null;
+        this.panning = false;
     }
 
     private pointer(e: MouseEvent): Vec2 {
@@ -48,11 +56,11 @@ export class ViewControls {
         this.screen = this.pointer(e);
         if (e.button === 0) {
             const p = this.camera.screenToWorld(this.screen);
-            const body = this.world.pickAt(p, PICK_MARGIN_PX / this.camera.zoom);
-            this.select(body && body.visible ? body : null);
+            const body = this.source.world.pickAt(p, PICK_MARGIN_PX / this.camera.zoom);
+            this.source.selectBody(body && body.visible ? body : null);
             if (body) {
-                const pullMass = this.world.connectedMass(body);
-                this.joint = this.world.addJoint(new MouseJoint(body, p, this.mouseStiffness, undefined, pullMass));
+                const pullMass = this.source.world.connectedMass(body);
+                this.joint = this.source.world.addJoint(new MouseJoint(body, p, this.mouseStiffness, undefined, pullMass));
             }
         } else {
             e.preventDefault();
@@ -70,7 +78,7 @@ export class ViewControls {
     private onUp(e: MouseEvent): void {
         if (e.button === 0) {
             if (!this.joint) return;
-            this.world.removeJoint(this.joint);
+            this.source.world.removeJoint(this.joint);
             this.joint = null;
         } else {
             this.panning = false;

@@ -3,6 +3,7 @@ import { type Shape, inertiaPerMass } from "./shapes";
 import { ALL_LAYERS, DEFAULT_LAYER } from "./filter";
 
 export interface BodyOptions {
+    name?: string;
     x?: number;
     y?: number;
     angle?: number;
@@ -30,12 +31,12 @@ let nextId = 1;
 
 export class Body {
     readonly id: number = nextId++;
-    readonly shape: Shape;
-    readonly isStatic: boolean;
-    readonly mass: number;
-    readonly invMass: number;
-    readonly inertia: number;
-    readonly invInertia: number;
+    name: string;
+    isStatic = false;
+    mass = 0; // 0 while static
+    invMass = 0;
+    inertia = 0;
+    invInertia = 0;
 
     pos: Vec2;
     angle: number;
@@ -53,6 +54,21 @@ export class Body {
     linearDamping: number;
     angularDamping: number;
 
+    // per-step diagnostics for the inspector: acceleration over the last step, and the force
+    // that joints and contacts applied (impulses summed over the step / step length)
+    accX = 0;
+    accY = 0;
+    constraintForceX = 0;
+    constraintForceY = 0;
+    private v0x = 0;
+    private v0y = 0;
+    private impulseX = 0;
+    private impulseY = 0;
+
+    private shapeValue: Shape;
+    private baseMass: number;
+    private forcedStatic: boolean;
+
     private fx = 0;
     private fy = 0;
     private torque = 0;
@@ -63,13 +79,11 @@ export class Body {
     private cacheAngle = NaN;
 
     constructor(shape: Shape, o: BodyOptions = {}) {
-        const mass = o.mass ?? 1;
-        this.shape = shape;
-        this.isStatic = o.static === true || shape.type === "plane" || mass <= 0;
-        this.mass = this.isStatic ? 0 : mass;
-        this.invMass = this.isStatic ? 0 : 1 / mass;
-        this.inertia = this.isStatic ? 0 : mass * inertiaPerMass(shape);
-        this.invInertia = this.inertia > 0 ? 1 / this.inertia : 0;
+        this.shapeValue = shape;
+        this.baseMass = o.mass ?? 1;
+        this.forcedStatic = o.static === true;
+        this.refreshMass();
+        this.name = o.name ?? `${shape.type[0].toUpperCase()}${shape.type.slice(1)} ${this.id}`;
 
         this.pos = new Vec2(o.x ?? 0, o.y ?? 0);
         this.angle = o.angle ?? 0;
@@ -82,6 +96,58 @@ export class Body {
         this.visible = o.visible ?? true;
         this.linearDamping = o.linearDamping ?? 0;
         this.angularDamping = o.angularDamping ?? 0;
+    }
+
+    get shape(): Shape {
+        return this.shapeValue;
+    }
+
+    // the mass the body has (or would have, if it were not static)
+    get nominalMass(): number {
+        return this.baseMass;
+    }
+
+    setMass(mass: number): void {
+        this.baseMass = mass;
+        this.refreshMass();
+    }
+
+    setStatic(isStatic: boolean): void {
+        this.forcedStatic = isStatic;
+        this.refreshMass();
+    }
+
+    setShape(shape: Shape): void {
+        this.shapeValue = shape;
+        this.cacheX = NaN;
+        this.refreshMass();
+    }
+
+    private refreshMass(): void {
+        this.isStatic = this.forcedStatic || this.shapeValue.type === "plane" || this.baseMass <= 0;
+        this.mass = this.isStatic ? 0 : this.baseMass;
+        this.invMass = this.isStatic ? 0 : 1 / this.baseMass;
+        this.inertia = this.isStatic ? 0 : this.baseMass * inertiaPerMass(this.shapeValue);
+        this.invInertia = this.inertia > 0 ? 1 / this.inertia : 0;
+        if (this.isStatic) {
+            this.vx = 0;
+            this.vy = 0;
+            this.angVel = 0;
+        }
+    }
+
+    beginStep(): void {
+        this.v0x = this.vx;
+        this.v0y = this.vy;
+        this.impulseX = 0;
+        this.impulseY = 0;
+    }
+
+    endStep(dt: number): void {
+        this.accX = (this.vx - this.v0x) / dt;
+        this.accY = (this.vy - this.v0y) / dt;
+        this.constraintForceX = this.impulseX / dt;
+        this.constraintForceY = this.impulseY / dt;
     }
 
     // Velocity is stored as scalars (the solver's hot loops avoid allocating vectors);
@@ -114,6 +180,8 @@ export class Body {
 
     applyImpulseXY(px: number, py: number, rx: number, ry: number): void {
         if (this.invMass === 0) return;
+        this.impulseX += px;
+        this.impulseY += py;
         this.vx += px * this.invMass;
         this.vy += py * this.invMass;
         this.angVel += this.invInertia * (rx * py - ry * px);

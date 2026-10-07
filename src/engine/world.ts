@@ -2,6 +2,7 @@ import { Vec2 } from "./vec2";
 import { Body, type BodyOptions } from "./body";
 import { type Shape, box, circle, plane } from "./shapes";
 import type { Joint } from "./joints";
+import type { Rope } from "./rope";
 import { canCollide } from "./filter";
 import { collide } from "./collision";
 import {
@@ -26,13 +27,18 @@ export interface BoundsOptions {
 export class World {
     readonly bodies: Body[] = [];
     readonly joints: Joint[] = [];
+    readonly ropes: Rope[] = []; // registered by Rope.addTo, for listing and inspection
     gravity: Vec2 = new Vec2(0, -9.81);
     iterations = ITERATIONS;
+    fixedDt = FIXED_DT; // s, length of one physics step
+    time = 0; // s of simulated time
+    contactCount = 0; // contacts in the last substep
     relaxIterations = 12;
     positionIterations = POSITION_ITERATIONS;
     substeps = 1;
 
     private bounds: Body[] = [];
+    private boundsOptions: BoundsOptions = {};
     private cache = new Map<number, Manifold>();
     private accumulator = 0;
 
@@ -58,6 +64,15 @@ export class World {
         if (i !== -1) this.bodies.splice(i, 1);
     }
 
+    // removes the body together with every joint attached to it
+    removeBody(body: Body): void {
+        this.remove(body);
+        for (const j of [...this.joints]) {
+            const [a, b] = j.connects();
+            if (a === body || b === body) this.removeJoint(j);
+        }
+    }
+
     addJoint<T extends Joint>(joint: T): T {
         this.joints.push(joint);
         return joint;
@@ -72,12 +87,17 @@ export class World {
     setBounds(b: BoundsOptions): void {
         for (const old of this.bounds) this.remove(old);
         this.bounds = [];
-        const wall = (normal: Vec2, point: Vec2) =>
-            this.bounds.push(this.addBody(plane(normal, point), { restitution: 0, color: "#444444" }));
-        if (b.floor !== undefined) wall(new Vec2(0, 1), new Vec2(0, b.floor));
-        if (b.ceiling !== undefined) wall(new Vec2(0, -1), new Vec2(0, b.ceiling));
-        if (b.left !== undefined) wall(new Vec2(1, 0), new Vec2(b.left, 0));
-        if (b.right !== undefined) wall(new Vec2(-1, 0), new Vec2(b.right, 0));
+        this.boundsOptions = { ...b };
+        const wall = (name: string, normal: Vec2, point: Vec2) =>
+            this.bounds.push(this.addBody(plane(normal, point), { name, restitution: 0, color: "#444444" }));
+        if (b.floor !== undefined) wall("Floor", new Vec2(0, 1), new Vec2(0, b.floor));
+        if (b.ceiling !== undefined) wall("Ceiling", new Vec2(0, -1), new Vec2(0, b.ceiling));
+        if (b.left !== undefined) wall("Left wall", new Vec2(1, 0), new Vec2(b.left, 0));
+        if (b.right !== undefined) wall("Right wall", new Vec2(-1, 0), new Vec2(b.right, 0));
+    }
+
+    getBounds(): BoundsOptions {
+        return { ...this.boundsOptions };
     }
 
     // Visible bodies win over invisible ones (rope nodes), and an exact hit wins over a near miss.
@@ -124,21 +144,30 @@ export class World {
 
     step(dt: number): void {
         this.accumulator += Math.min(dt, MAX_FRAME_TIME);
-        while (this.accumulator >= FIXED_DT) {
-            this.fixedStep(FIXED_DT);
-            this.accumulator -= FIXED_DT;
+        while (this.accumulator >= this.fixedDt) {
+            this.fixedStep(this.fixedDt);
+            this.accumulator -= this.fixedDt;
         }
     }
 
+    // advances exactly one physics step (for stepping while paused)
+    stepOnce(): void {
+        this.fixedStep(this.fixedDt);
+    }
+
     private fixedStep(dt: number): void {
+        for (const b of this.bodies) b.beginStep();
         const h = dt / this.substeps;
         for (let i = 0; i < this.substeps; i++) this.subStep(h);
+        this.time += dt;
+        for (const b of this.bodies) b.endStep(dt);
     }
 
     private subStep(dt: number): void {
         for (const b of this.bodies) b.integrateVelocity(this.gravity, dt);
 
         const manifolds = this.detect();
+        this.contactCount = manifolds.length;
         for (const m of manifolds) prepareManifold(m, dt);
         for (const j of this.joints) j.prepare(dt);
 

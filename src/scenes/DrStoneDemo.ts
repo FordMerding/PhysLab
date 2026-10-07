@@ -19,33 +19,33 @@ function build(world: World): void {
     world.setBounds({ floor: 0 });
     const free = ALL_LAYERS & ~ROPE_LAYER;
 
-    const ceilingY = 15;
-    const movable1 = new Vec2(4.25, 3.9);
-    const movable2 = new Vec2(4.5, 2.5);
-    const movable3 = new Vec2(4.75, 1.5);
+    const ceilingY = 7.4;
+    const movable1 = new Vec2(4.25, 5.4);
+    const movable2 = new Vec2(4.5, 3.4);
+    const movable3 = new Vec2(4.75, 1.4);
     const fixed = new Vec2(movable1.x - 2 * TRACK, ceilingY);
     const hook1 = new Vec2(movable1.x + TRACK, ceilingY);
     const hook2 = new Vec2(movable2.x + TRACK, ceilingY);
     const hook3 = new Vec2(movable3.x + TRACK, ceilingY);
-    const handlePos = new Vec2(fixed.x - TRACK, 10);
+    const handlePos = new Vec2(fixed.x - TRACK, 5.9);
 
-    world.addCircle({ x: fixed.x, y: fixed.y, radius: PULLEY_RADIUS, static: true, friction: 0.05, color: "#666666" });
-    const hooks = [hook1, hook2, hook3].map((h) =>
-        world.addCircle({ x: h.x, y: h.y, radius: 0.06, static: true, mask: free, color: "#666666" })
+    world.addCircle({ name: "Fixed pulley", x: fixed.x, y: fixed.y, radius: PULLEY_RADIUS, static: true, friction: 0.05, color: "#666666" });
+    const hooks = [hook1, hook2, hook3].map((h, i) =>
+        world.addCircle({ name: `Hook ${i + 1}`, x: h.x, y: h.y, radius: 0.06, static: true, mask: free, color: "#666666" })
     );
-    const pulleys = [movable1, movable2, movable3].map((p) =>
-        world.addCircle({ x: p.x, y: p.y, radius: PULLEY_RADIUS, mass: 5, friction: 0.05, color: "#888888" })
+    const pulleys = [movable1, movable2, movable3].map((p, i) =>
+        world.addCircle({ name: `Pulley ${i + 1}`, x: p.x, y: p.y, radius: PULLEY_RADIUS, mass: 5, friction: 0.05, color: "#888888" })
     );
-    const handle = world.addCircle({ x: handlePos.x, y: handlePos.y, radius: 0.15, mass: 61, mask: free, color: "#4444ff" });
-    const tree = world.addBox({ x: movable3.x, y: 0.5, w: 1, h: 1, mass: 600, color: "#8a6d3b" });
+    const handle = world.addCircle({ name: "Handle", x: handlePos.x, y: handlePos.y, radius: 0.15, mass: 61, mask: free, color: "#4444ff" });
+    const tree = world.addBox({ name: "Tree", x: movable3.x, y: 0.5, w: 1, h: 1, mass: 600, color: "#8a6d3b" });
     world.addJoint(new DistanceJoint(tree, pulleys[2], { mode: "max", length: 1.0 }));
 
-    const options = { radius: ROPE_RADIUS, spacing: 0.15, nodeMass: 0.5, friction: 0.05, damping: 100 };
+    const options = { radius: ROPE_RADIUS, spacing: 0.15, nodeMass: 0.5, friction: 0.05 };
     const rim = new Vec2(0, -TRACK); // rope 2 and 3 hang from the bottom of the pulley above them
 
     const rope1 = new Rope(
         [hook1, ...arc(movable1, TRACK, 0, -Math.PI), ...arc(fixed, TRACK, 0, Math.PI), handlePos],
-        options
+        { ...options, name: "Rope 1" }
     );
     rope1.pinStart(hooks[0]);
     rope1.pinEnd(handle);
@@ -53,7 +53,7 @@ function build(world: World): void {
 
     const rope2 = new Rope(
         [hook2, ...arc(movable2, TRACK, 0, -Math.PI), movable1.add(rim)],
-        options
+        { ...options, name: "Rope 2" }
     );
     rope2.pinStart(hooks[1]);
     rope2.pinEnd(pulleys[0], rim);
@@ -61,7 +61,7 @@ function build(world: World): void {
 
     const rope3 = new Rope(
         [hook3, ...arc(movable3, TRACK, 0, -Math.PI), movable2.add(rim)],
-        options
+        { ...options, name: "Rope 3" }
     );
     rope3.pinStart(hooks[2]);
     rope3.pinEnd(pulleys[1], rim);

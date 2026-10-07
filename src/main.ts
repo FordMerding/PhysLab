@@ -1,29 +1,48 @@
-import { World } from "./engine/world";
+import { Vec2 } from "./engine/vec2";
 import { Camera } from "./render/camera";
 import { Renderer } from "./render/renderer";
-import { ViewControls } from "./input/viewcontrols.ts";
-import { Vec2 } from "./engine/vec2";
+import { ViewControls } from "./input/viewControls";
+import { Simulation } from "./sim/simulation";
 import { scenes } from "./scenes";
+import { createUI } from "./ui/ui";
+import "./ui/ui.css";
 
 const canvas = document.getElementById("simulation") as HTMLCanvasElement;
 const camera = new Camera();
 const renderer = new Renderer(canvas, camera);
-const world = new World();
+const sim = new Simulation(scenes);
+const controls = new ViewControls(canvas, sim, camera);
+const ui = createUI(sim, controls, camera);
 
-// pick a scene with ?scene=<index>
-const scene = scenes[Number(new URLSearchParams(location.search).get("scene") ?? 0)] ?? scenes[0];
-scene.build(world);
-camera.center = new Vec2(scene.view.x, scene.view.y);
-camera.zoom = scene.view.zoom;
-
-const controls = new ViewControls(canvas, world, camera);
+sim.onLoad = (scene) => {
+    camera.center = new Vec2(scene.view.x, scene.view.y);
+    camera.zoom = scene.view.zoom;
+    controls.release();
+    ui.refresh();
+};
 
 window.addEventListener("resize", () => renderer.resize());
 renderer.resize();
 
-let paused = false;
+// pick the starting scene with ?scene=<index>
+sim.loadScene(scenes[Number(new URLSearchParams(location.search).get("scene") ?? 0)] ?? scenes[0]);
+
 window.addEventListener("keydown", (e) => {
-    if (e.code === "Space") paused = !paused;
+    if ((e.code === "Delete" || e.code === "Backspace") && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLSelectElement)) {
+        if (sim.selectedBody) sim.world.removeBody(sim.selectedBody);
+        else if (sim.selectedRope) sim.selectedRope.removeFrom(sim.world);
+        else return;
+        e.preventDefault();
+        sim.clearSelection();
+        return;
+    }
+    if (e.code !== "Space") return;
+    const t = e.target;
+    if (t instanceof HTMLSelectElement) return;
+    if (t instanceof HTMLInputElement && t.type === "number") return;
+    e.preventDefault();
+    sim.paused = !sim.paused;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 });
 
 let previous: number | null = null;
@@ -31,8 +50,9 @@ function frame(time: number): void {
     const dt = previous === null ? 0 : (time - previous) / 1000;
     previous = time;
 
-    if (!paused) world.step(dt);
-    renderer.draw(world, controls.selected);
+    sim.frame(dt);
+    renderer.draw(sim.world, sim.selectedBody, sim.selectedRope);
+    ui.update(time);
     requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

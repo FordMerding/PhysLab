@@ -6,6 +6,7 @@ import { ALL_LAYERS, ROPE_LAYER } from "./filter";
 import type { World } from "./world";
 
 export interface RopeOptions {
+    name?: string;
     radius?: number; // m
     spacing?: number; // m, distance between nodes along the rope
     nodeMass?: number; // kg
@@ -21,7 +22,7 @@ export interface RopeOptions {
 // while the rope as a whole still swings and falls freely.
 class NodeDamper extends Joint {
     private readonly nodes: readonly Body[];
-    private readonly rate: number;
+    rate: number;
 
     constructor(nodes: readonly Body[], rate: number) {
         super(nodes[0], nodes[1]);
@@ -53,10 +54,15 @@ class NodeDamper extends Joint {
 export class Rope {
     readonly nodes: Body[] = [];
     readonly joints: Joint[] = [];
-    private readonly restLength: number;
+    readonly restLength: number;
+    readonly radius: number;
+    name: string;
+    private damper: NodeDamper | null = null;
 
     constructor(path: readonly Vec2[], o: RopeOptions = {}) {
         const radius = o.radius ?? 0.04;
+        this.radius = radius;
+        this.name = o.name ?? "Rope";
         const spacing = o.spacing ?? radius * 2;
         const color = o.color ?? "#c9a227";
 
@@ -89,7 +95,10 @@ export class Rope {
             link.lineWidth = radius * 2;
             this.joints.push(link);
         }
-        if (this.nodes.length > 1) this.joints.push(new NodeDamper(this.nodes, o.damping ?? 50));
+        if (this.nodes.length > 1) {
+            this.damper = new NodeDamper(this.nodes, o.damping ?? 50);
+            this.joints.push(this.damper);
+        }
     }
 
     // `local` is the attachment point in the body's own frame; it should coincide with the rope end.
@@ -102,8 +111,44 @@ export class Rope {
     }
 
     addTo(world: World): void {
+        world.ropes.push(this);
         for (const n of this.nodes) world.add(n);
         for (const j of this.joints) world.addJoint(j);
+    }
+
+    removeFrom(world: World): void {
+        for (const n of this.nodes) world.remove(n);
+        for (const j of this.joints) world.removeJoint(j);
+        const i = world.ropes.indexOf(this);
+        if (i !== -1) world.ropes.splice(i, 1);
+    }
+
+    get nodeMass(): number {
+        return this.nodes[0].nominalMass;
+    }
+
+    setNodeMass(mass: number): void {
+        for (const n of this.nodes) n.setMass(mass);
+    }
+
+    get friction(): number {
+        return this.nodes[0].friction;
+    }
+
+    setFriction(friction: number): void {
+        for (const n of this.nodes) n.friction = friction;
+    }
+
+    get damping(): number {
+        return this.damper?.rate ?? 0;
+    }
+
+    setDamping(rate: number): void {
+        if (this.damper) this.damper.rate = rate;
+    }
+
+    currentLength(): number {
+        return this.restLength + this.stretch();
     }
 
     // how much longer the rope currently is than when it was built

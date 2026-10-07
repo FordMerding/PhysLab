@@ -23,11 +23,12 @@ function build(world: World): void {
     const hookPos = new Vec2(movablePos.x - TRACK, 6.0);
     const handlePos = new Vec2(fixedPos.x + TRACK, 5.3);
 
-    world.addBox({ x: 3.1, y: 3.0, w: 2.6, h: 0.2, static: true, color: "#444444" });
-    world.addCircle({ x: fixedPos.x, y: fixedPos.y, radius: PULLEY_RADIUS, static: true, friction: 0.05, color: "#666666" });
-    const hook = world.addCircle({ x: hookPos.x, y: hookPos.y, radius: 0.06, static: true, mask: free, color: "#666666" });
+    world.addBox({ name: "Shelf", x: 3.1, y: 3.0, w: 2.6, h: 0.2, static: true, color: "#444444" });
+    world.addCircle({ name: "Fixed pulley", x: fixedPos.x, y: fixedPos.y, radius: PULLEY_RADIUS, static: true, friction: 0.05, color: "#666666" });
+    const hook = world.addCircle({ name: "Hook", x: hookPos.x, y: hookPos.y, radius: 0.06, static: true, mask: free, color: "#666666" });
 
     const movable = world.addCircle({
+        name: "Movable pulley",
         x: movablePos.x,
         y: movablePos.y,
         radius: PULLEY_RADIUS,
@@ -35,14 +36,14 @@ function build(world: World): void {
         friction: 0.05,
         color: "#994444",
     });
-    const load = world.addBox({ x: movablePos.x, y: 3.25, w: 1.0, h: 0.3, mass: 40, color: "#222222" });
+    const load = world.addBox({ name: "Load", x: movablePos.x, y: 3.25, w: 1.0, h: 0.3, mass: 40, color: "#222222" });
     world.addJoint(new DistanceJoint(movable, load, { length: 1.0, mode: "max" }));
 
-    const handle = world.addCircle({ x: handlePos.x, y: handlePos.y, radius: 0.14, mass: 12, mask: free, color: "#3366cc" });
+    const handle = world.addCircle({ name: "Handle", x: handlePos.x, y: handlePos.y, radius: 0.14, mass: 12, mask: free, color: "#3366cc" });
 
     const rope = new Rope(
         [hookPos, ...arc(movablePos, TRACK, Math.PI, 2 * Math.PI), ...arc(fixedPos, TRACK, Math.PI, 0), handlePos],
-        { radius: ROPE_RADIUS, spacing: 0.1, nodeMass: 0.05, friction: 0.05 }
+        { name: "Rope", radius: ROPE_RADIUS, spacing: 0.1, nodeMass: 0.05, friction: 0.05 }
     );
     rope.pinStart(hook);
     rope.pinEnd(handle);
