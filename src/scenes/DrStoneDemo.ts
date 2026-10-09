@@ -38,7 +38,8 @@ function build(world: World): void {
     );
     const handle = world.addCircle({ name: "Handle", x: handlePos.x, y: handlePos.y, radius: 0.15, mass: 61, mask: free, color: "#4444ff" });
     const tree = world.addBox({ name: "Tree", x: movable3.x, y: 0.5, w: 1, h: 1, mass: 600, color: "#8a6d3b" });
-    world.addJoint(new DistanceJoint(tree, pulleys[2], { mode: "max", length: 1.0 }));
+    const link = world.addJoint(new DistanceJoint(tree, pulleys[2], { mode: "max", length: 1.0 }));
+    link.name = "Tree link";
 
     const options = { radius: ROPE_RADIUS, spacing: 0.15, nodeMass: 0.5, friction: 0.05 };
     const rim = new Vec2(0, -TRACK); // rope 2 and 3 hang from the bottom of the pulley above them
@@ -68,4 +69,4 @@ function build(world: World): void {
     rope3.addTo(world);
 }
 
-export const drStoneDemo: Scene = { name: "Dr. Stone pulleys", view: { x: 4.2, y: 3.8, zoom: 100 }, build };
+export const drStoneDemo: Scene = { name: "Dr. Stone pulleys", view: { x: 4.2, y: 3.8, zoom: 100, w: 3.4, h: 8 }, build };

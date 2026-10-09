@@ -35,7 +35,7 @@ export class World {
     contactCount = 0; // contacts in the last substep
     relaxIterations = 12;
     positionIterations = POSITION_ITERATIONS;
-    substeps = 1;
+    substeps = 4;
 
     private bounds: Body[] = [];
     private boundsOptions: BoundsOptions = {};
@@ -100,17 +100,18 @@ export class World {
         return { ...this.boundsOptions };
     }
 
-    // Visible bodies win over invisible ones (rope nodes), and an exact hit wins over a near miss.
-    pickAt(point: Vec2, margin = 0): Body | null {
-        const passes: Array<[boolean, number]> = [
-            [true, 0],
-            [true, margin],
-            [false, margin],
+    // An exact hit on a visible body wins; then rope nodes (invisible) within the margin, so a rope
+    // can be grabbed next to a body; then visible bodies within the margin.
+    pickAt(point: Vec2, margin = 0, includeStatic = false): Body | null {
+        const passes: Array<[(b: Body) => boolean, number]> = [
+            [(b) => b.visible, 0],
+            [(b) => !b.visible, margin],
+            [(b) => b.visible, margin],
         ];
-        for (const [visibleOnly, m] of passes) {
+        for (const [accept, m] of passes) {
             for (let i = this.bodies.length - 1; i >= 0; i--) {
                 const b = this.bodies[i];
-                if (b.isStatic || (visibleOnly && !b.visible)) continue;
+                if ((b.isStatic && !includeStatic) || !accept(b)) continue;
                 if (b.contains(point, m)) return b;
             }
         }
@@ -208,7 +209,7 @@ export class World {
             const a = bodies[lo];
             const b = bodies[hi];
             if (a.isStatic && b.isStatic) return;
-            if (canCollide(a, b)) pairs.push([a, b]);
+            if (canCollide(a, b) && !a.ignores(b)) pairs.push([a, b]);
         };
 
         for (let i = 0; i < n; i++) {

@@ -60,6 +60,12 @@ export class Body {
     accY = 0;
     constraintForceX = 0;
     constraintForceY = 0;
+    // the same values low-pass filtered (~0.15 s), for readouts and vector overlays
+    smoothAccX = 0;
+    smoothAccY = 0;
+    smoothForceX = 0;
+    smoothForceY = 0;
+    private ignored: Set<Body> | null = null;
     private v0x = 0;
     private v0y = 0;
     private impulseX = 0;
@@ -148,6 +154,21 @@ export class Body {
         this.accY = (this.vy - this.v0y) / dt;
         this.constraintForceX = this.impulseX / dt;
         this.constraintForceY = this.impulseY / dt;
+        const k = 1 - Math.exp(-dt / 0.15);
+        this.smoothAccX += (this.accX - this.smoothAccX) * k;
+        this.smoothAccY += (this.accY - this.smoothAccY) * k;
+        this.smoothForceX += (this.constraintForceX - this.smoothForceX) * k;
+        this.smoothForceY += (this.constraintForceY - this.smoothForceY) * k;
+    }
+
+    // the two bodies never collide with each other (e.g. a rope end and the body it is pinned to)
+    ignoreCollisionWith(other: Body): void {
+        (this.ignored ??= new Set()).add(other);
+        (other.ignored ??= new Set()).add(this);
+    }
+
+    ignores(other: Body): boolean {
+        return this.ignored !== null && this.ignored.has(other);
     }
 
     // Velocity is stored as scalars (the solver's hot loops avoid allocating vectors);

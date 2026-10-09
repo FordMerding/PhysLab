@@ -2,12 +2,12 @@ import { Vec2 } from "../engine/vec2";
 import { circle, polygonSize, scalePolygon, shapeArea } from "../engine/shapes";
 import type { Body } from "../engine/body";
 import type { Rope } from "../engine/rope";
+import { DistanceJoint, PinJoint, SpringJoint, type Joint } from "../engine/joints";
 import type { Simulation } from "../sim/simulation";
 import { el } from "./dom";
-import { button, checkbox, colorField, info, numberField, section, textField, type Control } from "./widgets";
+import { button, checkbox, colorField, info, numberField, section, select, textField, type Control } from "./widgets";
 
 const DEG = 180 / Math.PI;
-const SMOOTHING = 0.3;
 
 interface Content {
     element: HTMLElement;
@@ -17,15 +17,6 @@ interface Content {
 const num = (v: number, digits = 2): string => v.toFixed(digits);
 const vec = (x: number, y: number, unit: string): string => `${num(x)}, ${num(y)} ${unit}`;
 const mag = (x: number, y: number): number => Math.hypot(x, y);
-
-// exponential smoothing so contact jitter doesn't make the force/acceleration readouts unreadable
-class Smooth {
-    private value: number | null = null;
-    next(raw: number): number {
-        this.value = this.value === null ? raw : this.value + (raw - this.value) * SMOOTHING;
-        return this.value;
-    }
-}
 
 function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Content {
     const root = el("div");
@@ -132,11 +123,6 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
     );
     root.append(header.element, motion.element, props.element, dynamics.element, remove);
 
-    const sAx = new Smooth();
-    const sAy = new Smooth();
-    const sCx = new Smooth();
-    const sCy = new Smooth();
-
     return {
         element: root,
         update(): void {
@@ -148,8 +134,8 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
             vy.set(body.vy);
             omega.set(body.angVel);
             speed.set(`${num(mag(body.vx, body.vy))} m/s`);
-            const ax = sAx.next(body.accX);
-            const ay = sAy.next(body.accY);
+            const ax = body.smoothAccX;
+            const ay = body.smoothAccY;
             accel.set(`${vec(ax, ay, "m/s²")}  (${num(mag(ax, ay))})`);
             energy.set(`${num(0.5 * body.mass * (body.vx ** 2 + body.vy ** 2) + 0.5 * body.inertia * body.angVel ** 2)} J`);
 
@@ -173,8 +159,8 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
 
             const wx = body.mass * g.x;
             const wy = body.mass * g.y;
-            const cx = sCx.next(body.constraintForceX);
-            const cy = sCy.next(body.constraintForceY);
+            const cx = body.smoothForceX;
+            const cy = body.smoothForceY;
             weight.set(`${vec(wx, wy, "N")}  (${num(mag(wx, wy))})`);
             contact.set(`${vec(cx, cy, "N")}  (${num(mag(cx, cy))})`);
             net.set(`${vec(wx + cx, wy + cy, "N")}  (${num(mag(wx + cx, wy + cy))})`);
@@ -227,6 +213,66 @@ function ropeContent(sim: Simulation, rope: Rope, onListChange: () => void): Con
     };
 }
 
+const MODES: Array<"fixed" | "max" | "min"> = ["fixed", "max", "min"];
+
+function jointContent(sim: Simulation, joint: Joint, onListChange: () => void): Content {
+    const root = el("div");
+    const header = section("Joint");
+    const name = textField("Name", joint.name, (v) => {
+        joint.name = v || joint.name;
+        onListChange();
+    });
+    const [a, b] = joint.connects();
+    const between = info("Connects");
+    between.set(`${a.name} ↔ ${b.name}`);
+    const separation = info("Distance");
+    header.body.append(name.element, between.element, separation.element);
+
+    const props = section("Properties");
+    let tension: ReturnType<typeof info> | null = null;
+    const controls: Array<{ set(): void }> = [];
+
+    if (joint instanceof DistanceJoint) {
+        const mode = select("Type", ["Rod (fixed)", "Max (rope-like)", "Min (strut)"], MODES.indexOf(joint.mode), (i) => (joint.mode = MODES[i]));
+        const length = numberField({ label: "Length", value: joint.length, step: 0.01, min: 0.01, unit: "m", onChange: (v) => (joint.length = v) });
+        props.body.append(mode.element, length.element);
+        controls.push({ set: () => length.set(joint.length) });
+        tension = info("Tension");
+    } else if (joint instanceof SpringJoint) {
+        const rest = numberField({ label: "Rest length", value: joint.restLength, step: 0.01, min: 0, unit: "m", onChange: (v) => (joint.restLength = v) });
+        const k = numberField({ label: "Stiffness", value: joint.stiffness, step: 10, min: 0.1, unit: "N/m", onChange: (v) => (joint.stiffness = v) });
+        const c = numberField({ label: "Damping", value: joint.damping, step: 0.5, min: 0, unit: "N·s/m", onChange: (v) => (joint.damping = v) });
+        props.body.append(rest.element, k.element, c.element);
+        controls.push({ set: () => (rest.set(joint.restLength), k.set(joint.stiffness), c.set(joint.damping)) });
+        tension = info("Tension");
+    } else if (joint instanceof PinJoint) {
+        props.body.append(el("div", "row info", "A hinge keeps both bodies joined at one point; rotation stays free."));
+    }
+    if (tension) props.body.append(tension.element);
+
+    const remove = button(
+        "Delete joint",
+        () => {
+            sim.world.removeJoint(joint);
+            sim.clearSelection();
+            onListChange();
+        },
+        "danger"
+    );
+    root.append(header.element, props.element, remove);
+
+    return {
+        element: root,
+        update(): void {
+            separation.set(`${num(joint.separation(), 3)} m`);
+            for (const c of controls) c.set();
+            if (tension && (joint instanceof DistanceJoint || joint instanceof SpringJoint)) {
+                tension.set(`${num(-joint.force(), 1)} N`); // negative = compression
+            }
+        },
+    };
+}
+
 // Right-hand panel; shows whatever is selected in the simulation.
 export function createInspector(sim: Simulation, onListChange: () => void) {
     const root = el("div", "panel inspector hidden");
@@ -240,6 +286,7 @@ export function createInspector(sim: Simulation, onListChange: () => void) {
         content = null;
         if (sim.selectedBody) content = bodyContent(sim, sim.selectedBody, onListChange);
         else if (sim.selectedRope) content = ropeContent(sim, sim.selectedRope, onListChange);
+        else if (sim.selectedJoint) content = jointContent(sim, sim.selectedJoint, onListChange);
         root.classList.toggle("hidden", content === null);
         body.replaceChildren(...(content ? [content.element] : []));
         content?.update();

@@ -320,3 +320,158 @@ button.danger {
 button.danger:hover {
     background: #3a2326;
 }
+
+label.drag {
+    touch-action: none;
+}
+
+.hint {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    max-width: 90vw;
+    text-align: center;
+}
+
+.legend .row,
+.view-tab .row .swatch {
+    margin-right: 4px;
+}
+
+/* --- small screens: quick bar on top, one panel at a time in a bottom sheet --- */
+:root {
+    --nav: 48px;
+}
+
+.quickbar {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    pointer-events: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+}
+
+.quickbar button {
+    flex: 0 0 auto;
+    min-width: 62px;
+}
+
+.quickbar .status {
+    margin-left: auto;
+    color: var(--dim);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px));
+    max-height: 46vh;
+    display: none;
+    flex-direction: column;
+    pointer-events: auto;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.4);
+}
+
+.sheet.open {
+    display: flex;
+}
+
+.sheet-body {
+    overflow: auto;
+    padding: 4px 12px 12px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.sheet-body > .panel {
+    position: static;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    border-radius: 0;
+}
+
+.sheet-body .tab-body {
+    padding: 0;
+}
+
+.nav {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(var(--nav) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    display: flex;
+    pointer-events: auto;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+}
+
+.nav button {
+    flex: 1;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--dim);
+    padding: 0 2px;
+}
+
+.nav button.active {
+    color: var(--text);
+    box-shadow: inset 0 3px var(--accent);
+}
+
+@media (max-width: 900px) {
+    .hint {
+        top: 62px;
+    }
+}
+
+/* bigger touch targets on touch screens */
+@media (pointer: coarse) {
+    .ui-root {
+        font-size: 14px;
+        touch-action: manipulation;
+    }
+
+    button,
+    .row input[type="number"],
+    .row input[type="text"],
+    .row select {
+        min-height: 38px;
+        font-size: 14px;
+    }
+
+    .row input[type="checkbox"] {
+        width: 22px;
+        height: 22px;
+    }
+
+    .row label {
+        flex-basis: 100px;
+    }
+
+    .item {
+        padding: 10px 8px;
+    }
+}

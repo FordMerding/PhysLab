@@ -37,7 +37,8 @@ function build(world: World): void {
         color: "#994444",
     });
     const load = world.addBox({ name: "Load", x: movablePos.x, y: 3.25, w: 1.0, h: 0.3, mass: 40, color: "#222222" });
-    world.addJoint(new DistanceJoint(movable, load, { length: 1.0, mode: "max" }));
+    const link = world.addJoint(new DistanceJoint(movable, load, { length: 1.0, mode: "max" }));
+    link.name = "Load link";
 
     const handle = world.addCircle({ name: "Handle", x: handlePos.x, y: handlePos.y, radius: 0.14, mass: 12, mask: free, color: "#3366cc" });
 
@@ -50,4 +51,4 @@ function build(world: World): void {
     rope.addTo(world);
 }
 
-export const pulleyDemo: Scene = { name: "Block and tackle", view: { x: 3.3, y: 3.2, zoom: 100 }, build };
+export const pulleyDemo: Scene = { name: "Block and tackle", view: { x: 3.3, y: 3.2, zoom: 100, w: 3, h: 6.8 }, build };

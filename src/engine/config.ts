@@ -1,7 +1,7 @@
 // Units: meters, kilograms, seconds, radians. The Y axis points up.
 export const FIXED_DT = 1 / 120;
 export const MAX_FRAME_TIME = 0.1;
-export const ITERATIONS = 12;
+export const ITERATIONS = 20;
 export const POSITION_ITERATIONS = 6;
 
 export const BAUMGARTE = 0.02; // contact push-out strength (unitless)

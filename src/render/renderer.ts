@@ -1,9 +1,23 @@
+import { Vec2 } from "../engine/vec2";
 import type { Body } from "../engine/body";
+import type { Joint } from "../engine/joints";
 import type { Rope } from "../engine/rope";
-import type { World } from "../engine/world";
+import type { Simulation } from "../sim/simulation";
 import type { Camera } from "./camera";
 
 const GRID_MIN_PIXELS = 60;
+const VELOCITY_COLOR = "#66bb6a";
+const WEIGHT_COLOR = "#ff7043";
+const CONTACT_COLOR = "#4fc3f7";
+const NET_COLOR = "#ffffff";
+const AUTO_VELOCITY_PX = 70; // longest velocity arrow with auto-scale
+const AUTO_FORCE_PX = 90; // longest force arrow with auto-scale
+
+interface Label {
+    text: string;
+    at: Vec2;
+    color: string;
+}
 
 function niceStep(min: number): number {
     const p = 10 ** Math.floor(Math.log10(min));
@@ -34,9 +48,10 @@ export class Renderer {
         this.camera.setViewport(w, h);
     }
 
-    draw(world: World, selected: Body | null = null, selectedRope: Rope | null = null): void {
+    draw(sim: Simulation): void {
         const ctx = this.ctx;
         const { camera: cam, dpr } = this;
+        const world = sim.world;
         const z = cam.zoom;
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -53,14 +68,109 @@ export class Renderer {
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
 
-        this.drawGrid();
+        if (sim.view.grid) this.drawGrid();
         for (const b of world.bodies) if (b.shape.type === "plane") this.drawPlane(b);
-        if (selectedRope) this.drawRopeHighlight(selectedRope);
-        this.drawJoints(world);
+        if (sim.selectedRope) this.drawRopeHighlight(sim.selectedRope);
+        this.drawJoints(sim);
 
         const sorted = world.bodies.filter((b) => b.visible && b.shape.type !== "plane").sort((p, q) => p.z - q.z);
         for (const b of sorted) this.drawBody(b);
-        if (selected) this.drawSelection(selected);
+        if (sim.selectedBody) this.drawSelection(sim.selectedBody);
+
+        if (sim.tool?.first) this.drawPendingAnchor(sim.tool.first.body, sim.tool.first.local);
+        const labels = this.drawVectors(sim);
+        this.drawLabels(labels);
+    }
+
+    private drawPendingAnchor(body: Body | null, local: Vec2): void {
+        const p = body ? body.toWorld(local) : local;
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#4c8dff";
+        ctx.lineWidth = 2 * this.px;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 7 * this.px, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    // Velocity and force arrows; returns their value labels (drawn later in screen space).
+    private drawVectors(sim: Simulation): Label[] {
+        const view = sim.view;
+        if (!view.velocity && !view.forces && !view.netForce) return [];
+        const g = sim.world.gravity;
+        const shown: Body[] = view.selectedOnly
+            ? sim.selectedBody && !sim.selectedBody.isStatic
+                ? [sim.selectedBody]
+                : []
+            : sim.world.bodies.filter((b) => b.visible && !b.isStatic);
+
+        const weight = (b: Body): Vec2 => g.mul(b.mass);
+        const contact = (b: Body): Vec2 => new Vec2(b.smoothForceX, b.smoothForceY);
+
+        let maxV = 0;
+        let maxF = 0;
+        for (const b of shown) {
+            maxV = Math.max(maxV, Math.hypot(b.vx, b.vy));
+            const w = weight(b);
+            const c = contact(b);
+            maxF = Math.max(maxF, w.len(), c.len(), w.add(c).len());
+        }
+        const vPx = view.autoScale ? (maxV > 1e-9 ? AUTO_VELOCITY_PX / maxV : 0) : view.velocityScale;
+        const fPx = view.autoScale ? (maxF > 1e-9 ? AUTO_FORCE_PX / maxF : 0) : view.forceScale;
+
+        const labels: Label[] = [];
+        const arrow = (from: Vec2, v: Vec2, pxPerUnit: number, color: string, unit: string): void => {
+            const length = v.len() * pxPerUnit;
+            if (length < 2) return;
+            const tip = from.add(v.mul(pxPerUnit * this.px));
+            this.drawArrow(from, tip, color);
+            if (view.labels) labels.push({ text: `${v.len().toPrecision(3)} ${unit}`, at: tip, color });
+        };
+        for (const b of shown) {
+            if (view.velocity) arrow(b.pos, new Vec2(b.vx, b.vy), vPx, VELOCITY_COLOR, "m/s");
+            if (view.forces) {
+                arrow(b.pos, weight(b), fPx, WEIGHT_COLOR, "N");
+                arrow(b.pos, contact(b), fPx, CONTACT_COLOR, "N");
+            }
+            if (view.netForce) arrow(b.pos, weight(b).add(contact(b)), fPx, NET_COLOR, "N");
+        }
+        return labels;
+    }
+
+    private drawArrow(from: Vec2, to: Vec2, color: string): void {
+        const ctx = this.ctx;
+        const px = this.px;
+        const d = to.sub(from);
+        const angle = Math.atan2(d.y, d.x);
+        const head = Math.min(9 * px, d.len() * 0.6);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2 * px;
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(to.x, to.y);
+        ctx.lineTo(to.x - Math.cos(angle - 0.45) * head, to.y - Math.sin(angle - 0.45) * head);
+        ctx.lineTo(to.x - Math.cos(angle + 0.45) * head, to.y - Math.sin(angle + 0.45) * head);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    private drawLabels(labels: Label[]): void {
+        if (labels.length === 0) return;
+        const ctx = this.ctx;
+        ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        ctx.font = "11px system-ui, sans-serif";
+        ctx.lineWidth = 3;
+        ctx.lineJoin = "round";
+        for (const l of labels) {
+            const p = this.camera.worldToScreen(l.at);
+            ctx.strokeStyle = "rgba(0,0,0,0.7)";
+            ctx.strokeText(l.text, p.x + 6, p.y - 6);
+            ctx.fillStyle = l.color;
+            ctx.fillText(l.text, p.x + 6, p.y - 6);
+        }
     }
 
     private get px(): number {
@@ -95,21 +205,27 @@ export class Renderer {
         ctx.stroke();
     }
 
-    private drawJoints(world: World): void {
+    private drawJoints(sim: Simulation): void {
         const ctx = this.ctx;
         const px = this.px;
-        for (const j of world.joints) {
+        for (const j of sim.world.joints) {
             if (!j.visible) continue;
             const [p, q] = j.anchors();
-            ctx.strokeStyle = j.color;
-            ctx.lineWidth = j.lineWidth > 0 ? j.lineWidth : 2 * px;
-            ctx.setLineDash(j.dashed ? [4 * px, 4 * px] : []);
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(q.x, q.y);
-            ctx.stroke();
+            if (j === sim.selectedJoint) this.strokeJoint(j, p, q, "rgba(255, 213, 74, 0.55)", 8 * px);
+            this.strokeJoint(j, p, q, j.color, j.lineWidth > 0 ? j.lineWidth : 2 * px);
         }
         ctx.setLineDash([]);
+    }
+
+    private strokeJoint(j: Joint, p: Vec2, q: Vec2, color: string, width: number): void {
+        const ctx = this.ctx;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.setLineDash(j.dashed ? [4 * this.px, 4 * this.px] : []);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(q.x, q.y);
+        ctx.stroke();
     }
 
     private drawPlane(b: Body): void {

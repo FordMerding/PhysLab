@@ -7,6 +7,8 @@ import { MAX_POSITION_CORRECTION } from "./config";
 // `correctPosition` moves bodies directly without touching their velocity. Turning drift
 // into velocity (Baumgarte) pumps energy into chains and makes ropes buzz.
 export abstract class Joint {
+    name = "Joint";
+    listed = true; // false hides it from the object list (rope internals, mouse grab)
     color = "#888888";
     dashed = false;
     visible = true;
@@ -24,6 +26,11 @@ export abstract class Joint {
         this.b = b;
         this.localA = localA;
         this.localB = localB;
+    }
+
+    separation(): number {
+        const [p, q] = this.anchors();
+        return p.dist(q);
     }
 
     connects(): [Body, Body] {
@@ -48,6 +55,7 @@ abstract class AxisJoint extends Joint {
     protected dist = 0;
     protected k = 0;
     protected acc = 0;
+    protected h = 0; // length of the last substep
     private rAx = 0;
     private rAy = 0;
     private rBx = 0;
@@ -117,6 +125,11 @@ abstract class AxisJoint extends Joint {
     warmStart(): void {
         this.applyAxis(this.acc);
     }
+
+    // force along the joint in N; positive pushes the bodies apart
+    force(): number {
+        return this.h > 0 ? this.acc / this.h : 0;
+    }
 }
 
 export interface DistanceJointOptions {
@@ -127,8 +140,8 @@ export interface DistanceJointOptions {
 }
 
 export class DistanceJoint extends AxisJoint {
-    private readonly length: number;
-    private readonly mode: "fixed" | "max" | "min";
+    length: number;
+    mode: "fixed" | "max" | "min";
     private mass = 0;
     private slack = 0;
 
@@ -146,6 +159,7 @@ export class DistanceJoint extends AxisJoint {
     }
 
     prepare(dt: number): void {
+        this.h = dt;
         this.measure();
         this.mass = this.k > 0 ? 1 / this.k : 0;
         // not at its limit yet: let the bodies approach until the limit is exactly reached
@@ -179,9 +193,9 @@ export interface SpringJointOptions {
 }
 
 export class SpringJoint extends AxisJoint {
-    private readonly restLength: number;
-    private readonly stiffness: number;
-    private readonly damping: number;
+    restLength: number;
+    stiffness: number;
+    damping: number;
     private mass = 0;
     private bias = 0;
     private gamma = 0;
@@ -194,6 +208,7 @@ export class SpringJoint extends AxisJoint {
     }
 
     prepare(dt: number): void {
+        this.h = dt;
         this.measure();
         const g = dt * (this.damping + dt * this.stiffness);
         this.gamma = g > 0 ? 1 / g : 0;
@@ -331,6 +346,7 @@ export class MouseJoint extends PinJoint {
         this.pullMass = Math.max(pullMass, body.mass);
         this.color = "#3366cc";
         this.dashed = true;
+        this.listed = false;
     }
 
     setTarget(p: Vec2): void {

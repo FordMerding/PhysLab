@@ -93,10 +93,12 @@ export class Rope {
             const link = new DistanceJoint(this.nodes[i], this.nodes[i + 1], { length: segLen, mode: "max" });
             link.color = color;
             link.lineWidth = radius * 2;
+            link.listed = false;
             this.joints.push(link);
         }
         if (this.nodes.length > 1) {
             this.damper = new NodeDamper(this.nodes, o.damping ?? 50);
+            this.damper.listed = false;
             this.joints.push(this.damper);
         }
     }
@@ -161,6 +163,8 @@ export class Rope {
     private pin(body: Body, local: Vec2, node: Body): void {
         const joint = new PinJoint(body, node, { localA: local });
         joint.visible = false;
+        joint.listed = false;
+        node.ignoreCollisionWith(body);
         this.joints.push(joint);
     }
 }
@@ -175,4 +179,30 @@ function pointAlong(path: readonly Vec2[], distance: number): Vec2 {
         remaining -= seg;
     }
     return path[0];
+}
+
+// A path from a to b that hangs under gravity so its length is `length` (straight if that is not longer than the chord).
+export function sagPath(a: Vec2, b: Vec2, length: number, steps = 24): Vec2[] {
+    const chord = a.dist(b);
+    if (length <= chord * 1.001) return [a, b];
+    const dir = b.sub(a).normalize();
+    let side = dir.perp();
+    if (side.y > 0 || (Math.abs(side.y) < 1e-9 && side.x < 0)) side = side.neg();
+    const build = (sag: number): Vec2[] => {
+        const pts: Vec2[] = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            pts.push(a.add(b.sub(a).mul(t)).add(side.mul(sag * 4 * t * (1 - t))));
+        }
+        return pts;
+    };
+    const lengthOf = (pts: Vec2[]): number => pts.slice(1).reduce((sum, p, i) => sum + p.dist(pts[i]), 0);
+    let lo = 0;
+    let hi = length;
+    for (let i = 0; i < 40; i++) {
+        const mid = (lo + hi) / 2;
+        if (lengthOf(build(mid)) < length) lo = mid;
+        else hi = mid;
+    }
+    return build((lo + hi) / 2);
 }
