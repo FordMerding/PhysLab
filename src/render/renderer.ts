@@ -77,7 +77,7 @@ export class Renderer {
         for (const b of sorted) this.drawBody(b);
         if (sim.selectedBody) this.drawSelection(sim.selectedBody);
 
-        if (sim.tool?.first) this.drawPendingAnchor(sim.tool.first.body, sim.tool.first.local);
+        if (sim.mode === "connect" && sim.connectFirst) this.drawPendingAnchor(sim.connectFirst.body, sim.connectFirst.local);
         const labels = this.drawVectors(sim);
         this.drawLabels(labels);
     }

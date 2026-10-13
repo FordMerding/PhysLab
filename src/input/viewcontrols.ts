@@ -1,5 +1,5 @@
 import { Vec2 } from "../engine/vec2";
-import { MouseJoint } from "../engine/joints";
+import { FollowJoint, MouseJoint } from "../engine/joints";
 import { anchorAt, connect } from "../sim/connect";
 import type { Simulation } from "../sim/simulation";
 import type { Camera } from "../render/camera";
@@ -8,10 +8,9 @@ const MIN_STIFFNESS = 10;
 const MAX_STIFFNESS = 5000;
 const PICK_MARGIN_PX = 8;
 
-// Pointer input (mouse, touch, pen).
-//   one pointer on a body: select and drag it;  on empty space: deselect and pan
-//   right/middle button: pan;  wheel or two-finger pinch: zoom;  Shift + wheel: mouse pull stiffness
-// While the connect tool is active, taps pick the two ends of the new connection instead.
+// Pointer input (mouse, touch, pen). What the primary button does depends on `sim.mode`:
+//   none: select, pan   force: pull bodies   move: carry bodies   create: place objects   connect: join two points
+// Always: right/middle button pans, wheel or two-finger pinch zooms, Shift + wheel changes the pull stiffness.
 export class ViewControls {
     mouseStiffness = 400;
 
@@ -19,7 +18,7 @@ export class ViewControls {
     private readonly sim: Simulation;
     private readonly camera: Camera;
     private readonly pointers = new Map<number, Vec2>();
-    private joint: MouseJoint | null = null;
+    private joint: MouseJoint | FollowJoint | null = null;
     private panning = false;
     private pinchDistance = 1;
     private pinchCenter: Vec2 = Vec2.ZERO;
@@ -56,6 +55,7 @@ export class ViewControls {
     }
 
     private drop(): void {
+        if (this.joint instanceof FollowJoint) this.joint.release();
         if (this.joint) this.sim.world.removeJoint(this.joint);
         this.joint = null;
     }
@@ -76,45 +76,54 @@ export class ViewControls {
 
         const point = this.camera.screenToWorld(p);
         const margin = PICK_MARGIN_PX / this.camera.zoom;
-        if (this.sim.tool) return this.toolTap(point, margin);
+        const sim = this.sim;
+        if (sim.mode === "create") {
+            sim.placeBody(point);
+            return;
+        }
+        if (sim.mode === "connect") return this.connectTap(point, margin);
 
-        const world = this.sim.world;
+        const world = sim.world;
         const body = world.pickAt(point, margin, true);
         if (!body) {
-            this.sim.clearSelection();
+            sim.clearSelection();
             this.panning = true;
-        } else if (!body.visible) {
-            // rope nodes are invisible: tapping one selects its rope
-            this.sim.selectRope(world.ropes.find((r) => r.nodes.includes(body)) ?? null);
+            return;
+        }
+        // rope nodes are invisible: tapping one selects its rope
+        if (body.visible) sim.selectBody(body);
+        else sim.selectRope(world.ropes.find((r) => r.nodes.includes(body)) ?? null);
+
+        const grabbing = sim.mode === "force" || sim.mode === "move";
+        if (!grabbing || body.isStatic) {
+            this.panning = true;
+        } else if (sim.mode === "force") {
             this.joint = world.addJoint(new MouseJoint(body, point, this.mouseStiffness, undefined, world.connectedMass(body)));
         } else {
-            this.sim.selectBody(body);
-            if (body.isStatic) this.panning = true;
-            else this.joint = world.addJoint(new MouseJoint(body, point, this.mouseStiffness, undefined, world.connectedMass(body)));
+            this.joint = world.addJoint(new FollowJoint(body, point));
         }
     }
 
-    private toolTap(point: Vec2, margin: number): void {
-        const tool = this.sim.tool;
-        if (!tool) return;
-        const body = this.sim.world.pickAt(point, margin, true);
+    private connectTap(point: Vec2, margin: number): void {
+        const sim = this.sim;
+        const body = sim.world.pickAt(point, margin, true);
         const picked = body && body.visible ? body : null;
-        const here = { body: picked, local: picked ? picked.toLocal(point) : point };
+        const first = sim.connectFirst;
 
-        if (!tool.first) {
-            tool.first = here;
-            this.sim.onToolChange();
+        if (!first) {
+            sim.connectFirst = { body: picked, local: picked ? picked.toLocal(point) : point };
+            sim.onModeChange();
             return;
         }
-        if (picked && picked === tool.first.body) return;
+        if (picked && picked === first.body) return;
 
-        const world = this.sim.world;
-        const a = anchorAt(world, tool.first.body ? tool.first.body.toWorld(tool.first.local) : tool.first.local, tool.first.body);
+        const world = sim.world;
+        const a = anchorAt(world, first.body ? first.body.toWorld(first.local) : first.local, first.body);
         const b = anchorAt(world, point, picked);
-        const made = connect(world, a, b, tool.options);
-        this.sim.cancelTool();
-        if (made.rope) this.sim.selectRope(made.rope);
-        else if (made.joint) this.sim.selectJoint(made.joint);
+        const made = connect(world, a, b, sim.connectOptions);
+        sim.setMode("none");
+        if (made.rope) sim.selectRope(made.rope);
+        else if (made.joint) sim.selectJoint(made.joint);
     }
 
     private beginPinch(): void {
@@ -160,7 +169,7 @@ export class ViewControls {
         if (e.shiftKey) {
             const factor = e.deltaY < 0 || e.deltaX < 0 ? 1.15 : 1 / 1.15;
             this.mouseStiffness = Math.min(MAX_STIFFNESS, Math.max(MIN_STIFFNESS, this.mouseStiffness * factor));
-            this.joint?.setStiffness(this.mouseStiffness);
+            if (this.joint instanceof MouseJoint) this.joint.setStiffness(this.mouseStiffness);
             return;
         }
         this.screen = this.pointer(e);

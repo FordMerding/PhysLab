@@ -475,3 +475,29 @@ label.drag {
         padding: 10px 8px;
     }
 }
+
+.modebar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.modebar button {
+    padding: 5px 2px;
+    min-width: 0;
+}
+
+button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.quickbar {
+    flex-wrap: wrap;
+}
+
+.quickbar .modebar {
+    flex: 1 0 100%;
+    margin: 0;
+}

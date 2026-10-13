@@ -43,12 +43,15 @@ export function createUI(sim: Simulation, controls: ViewControls, camera: Camera
         objectsTab.sync();
         layout.selectionChanged();
     };
-    sim.onToolChange = () => {
-        const text = sim.toolHint();
+    sim.onModeChange = () => {
+        const text = sim.modeHint();
         hint.textContent = text;
         hint.classList.toggle("hidden", text === "");
-        objectsTab.toolChanged();
+        simPanel.syncMode();
+        quickBar.syncMode();
+        objectsTab.modeChanged();
     };
+    sim.onModeChange();
 
     let last = 0;
     return {

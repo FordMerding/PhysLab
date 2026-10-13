@@ -1,13 +1,22 @@
 import type { Body } from "../engine/body";
 import type { Joint } from "../engine/joints";
 import type { Rope } from "../engine/rope";
+import type { Vec2 } from "../engine/vec2";
 import { World } from "../engine/world";
 import type { Scene } from "../scenes/scene";
-import { ViewSettings } from "./viewSettings.ts";
-import type { ConnectOptions } from "./connect";
-import type { Vec2 } from "../engine/vec2";
+import { DEFAULT_CONNECT, type ConnectOptions } from "./connect";
+import { DEFAULT_SPAWN, SPAWN_LABELS, spawnBody, type SpawnSettings } from "./spawn";
+import { ViewSettings } from "./viewSettings";
 
-// Owns the world and the run state (pause, time scale, timing statistics).
+// What the left mouse button / a finger does on the canvas.
+//   none     nothing is pushed; selecting and panning still work
+//   force    pull the body with a spring force
+//   move     carry the body to the cursor (it keeps colliding and keeps its speed when released)
+//   create   place a new object where you click
+//   connect  pick two points to join with a rope, rod, spring or hinge
+export type MouseMode = "none" | "force" | "move" | "create" | "connect";
+
+// Owns the world and the run state (pause, time scale, timing statistics, selection, mouse mode).
 export class Simulation {
     world = new World();
     scene: Scene;
@@ -25,10 +34,12 @@ export class Simulation {
 
     readonly view = new ViewSettings();
 
-    // "connect" tool: the next two taps pick the two ends of a new rope, rod, spring or hinge
-    // `first` is the tapped body and the tapped point in that body's frame (world frame for empty space)
-    tool: { options: ConnectOptions; first: { body: Body | null; local: Vec2 } | null } | null = null;
-    onToolChange: () => void = () => {};
+    mode: MouseMode = "force";
+    onModeChange: () => void = () => {};
+    readonly spawn: SpawnSettings = { ...DEFAULT_SPAWN };
+    readonly connectOptions: ConnectOptions = { ...DEFAULT_CONNECT };
+    // first tapped point of a connection: the body and the point in that body's frame (world frame for empty space)
+    connectFirst: { body: Body | null; local: Vec2 } | null = null;
 
     constructor(scenes: readonly Scene[]) {
         this.scenes = scenes;
@@ -39,9 +50,29 @@ export class Simulation {
         this.scene = scene;
         this.world = new World();
         scene.build(this.world);
-        this.cancelTool();
+        this.connectFirst = null;
         this.clearSelection();
         this.onLoad(scene);
+        this.onModeChange();
+    }
+
+    setMode(mode: MouseMode): void {
+        this.mode = mode;
+        this.connectFirst = null;
+        this.onModeChange();
+    }
+
+    // text shown on screen while a mode needs explaining
+    modeHint(): string {
+        if (this.mode === "create") return `Tap to place: ${SPAWN_LABELS[this.spawn.shape]}`;
+        if (this.mode === "connect") {
+            return this.connectFirst ? "Tap the second point (an object or empty space)" : "Tap the first point (an object or empty space)";
+        }
+        return "";
+    }
+
+    placeBody(point: Vec2): Body {
+        return spawnBody(this.world, this.spawn, point);
     }
 
     selectBody(body: Body | null): void {
@@ -67,22 +98,6 @@ export class Simulation {
 
     get hasSelection(): boolean {
         return this.selectedBody !== null || this.selectedRope !== null || this.selectedJoint !== null;
-    }
-
-    startConnect(options: ConnectOptions): void {
-        this.tool = { options, first: null };
-        this.onToolChange();
-    }
-
-    cancelTool(): void {
-        if (!this.tool) return;
-        this.tool = null;
-        this.onToolChange();
-    }
-
-    toolHint(): string {
-        if (!this.tool) return "";
-        return this.tool.first ? "Tap the second point (an object or empty space)" : "Tap the first point (an object or empty space)";
     }
 
     clearSelection(): void {

@@ -1,5 +1,6 @@
 import { el } from "./dom";
 import { button, readout, select, slider } from "./widgets";
+import { createModeBar } from "./modeBar";
 import type { Simulation } from "../sim/simulation";
 import type { ViewControls } from "../input/viewControls";
 import type { Camera } from "../render/camera";
@@ -52,12 +53,14 @@ export function createSimPanel(sim: Simulation, controls: ViewControls, camera: 
         },
     });
 
+    const modes = createModeBar(sim);
     const body = el("div", "panel-body");
-    body.append(grid, buttons, speed.element, pull.element);
+    body.append(modes.element, grid, buttons, speed.element, pull.element);
     root.append(head, body);
 
     return {
         element: root,
+        syncMode: modes.sync,
         refresh(): void {
             speed.set(TIME_SCALES.indexOf(sim.timeScale));
         },

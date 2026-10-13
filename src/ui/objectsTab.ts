@@ -1,15 +1,14 @@
 import { el } from "./dom";
-import { box, circle, regularPolygon, shapeArea, type Shape } from "../engine/shapes";
 import { PinJoint, SpringJoint, type Joint } from "../engine/joints";
 import type { Body } from "../engine/body";
 import type { Rope } from "../engine/rope";
-import { DEFAULT_CONNECT, type ConnectKind } from "../sim/connect";
+import type { ConnectKind } from "../sim/connect";
+import { SPAWN_LABELS, type SpawnShape } from "../sim/spawn";
 import type { Simulation } from "../sim/simulation";
 import type { Camera } from "../render/camera";
 import { Vec2 } from "../engine/vec2";
 import { button, checkbox, numberField, section, select } from "./widgets";
 
-const PALETTE = ["#e57373", "#64b5f6", "#81c784", "#ffd54f", "#ba68c8", "#4db6ac", "#ff8a65"];
 const KINDS: ConnectKind[] = ["rope", "rod", "spring", "pin"];
 const KIND_NAMES = ["Rope", "Rod", "Spring", "Hinge (pin)"];
 
@@ -25,39 +24,26 @@ export function createObjectsTab(sim: Simulation, camera: Camera) {
     const ropes = section("Ropes");
     root.append(add.element, connection.element, bodies.element, joints.element, ropes.element);
 
-    // --- new bodies appear at the center of the view
-    let size = 0.5;
-    let density = 100;
-    let makeStatic = false;
-    let colorIndex = 0;
-    const spawn = (label: string, shape: Shape): void => {
-        const body = sim.world.addBody(shape, {
-            x: camera.center.x,
-            y: camera.center.y,
-            mass: Math.max(0.001, density * shapeArea(shape)),
-            static: makeStatic,
-            color: PALETTE[colorIndex++ % PALETTE.length],
-        });
-        body.name = `${label} ${body.id}`;
-        sim.selectBody(body);
-        rebuild();
-    };
+    // --- choose what to create; the objects are placed where you click (Create mode)
+    const spawn = sim.spawn;
+    const shapeButtons = (Object.keys(SPAWN_LABELS) as SpawnShape[]).map((shape) => ({
+        shape,
+        button: button(SPAWN_LABELS[shape], () => {
+            spawn.shape = shape;
+            sim.setMode("create");
+        }),
+    }));
     const buttons = el("div", "buttons wrap");
-    buttons.append(
-        button("Circle", () => spawn("Circle", circle(size / 2))),
-        button("Box", () => spawn("Box", box(size, size))),
-        button("Triangle", () => spawn("Triangle", regularPolygon(3, size / 2))),
-        button("Hexagon", () => spawn("Hexagon", regularPolygon(6, size / 2)))
-    );
+    buttons.append(...shapeButtons.map((b) => b.button));
     add.body.append(
-        numberField({ label: "Size", value: size, step: 0.05, min: 0.05, unit: "m", onChange: (v) => (size = v) }).element,
-        numberField({ label: "Density", value: density, step: 10, min: 1, unit: "kg/m²", onChange: (v) => (density = v) }).element,
-        checkbox("Static", makeStatic, (v) => (makeStatic = v)).element,
+        numberField({ label: "Size", value: spawn.size, step: 0.05, min: 0.05, unit: "m", onChange: (v) => ((spawn.size = v), sim.onModeChange()) }).element,
+        numberField({ label: "Density", value: spawn.density, step: 10, min: 1, unit: "kg/m²", onChange: (v) => (spawn.density = v) }).element,
+        checkbox("Static", spawn.isStatic, (v) => (spawn.isStatic = v)).element,
         buttons
     );
 
     // --- connections: pick a type, press the button, then tap two points on the canvas
-    const options = { ...DEFAULT_CONNECT };
+    const options = sim.connectOptions;
     const ropeRows = el("div");
     const springRows = el("div");
     const showRows = (): void => {
@@ -77,10 +63,7 @@ export function createObjectsTab(sim: Simulation, camera: Camera) {
         options.kind = KINDS[i];
         showRows();
     });
-    const connectButton = button("Pick two points", () => {
-        if (sim.tool) sim.cancelTool();
-        else sim.startConnect({ ...options });
-    });
+    const connectButton = button("Connect mode", () => sim.setMode(sim.mode === "connect" ? "none" : "connect"));
     connection.body.append(kindSelect.element, ropeRows, springRows, connectButton);
     showRows();
 
@@ -153,8 +136,9 @@ export function createObjectsTab(sim: Simulation, camera: Camera) {
         update(): void {
             if (currentSignature() !== signature) rebuild();
         },
-        toolChanged(): void {
-            connectButton.textContent = sim.tool ? "Cancel" : "Pick two points";
+        modeChanged(): void {
+            connectButton.textContent = sim.mode === "connect" ? "Cancel" : "Connect mode";
+            for (const { shape, button: b } of shapeButtons) b.classList.toggle("active", sim.mode === "create" && spawn.shape === shape);
         },
     };
 }

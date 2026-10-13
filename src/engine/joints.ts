@@ -325,6 +325,75 @@ export class PinJoint extends Joint {
     }
 }
 
+// Carries a body so that the grabbed point follows the target: every substep the body's velocity is
+// set to the cursor's own velocity plus a correction toward the target. The body still collides
+// with everything and keeps its velocity when released, so it can be thrown.
+export class FollowJoint extends Joint {
+    private target: Vec2;
+    private sample: Vec2; // target at the last velocity sample
+    private idle = 0; // simulated time since that sample
+    private cursorVx = 0;
+    private cursorVy = 0;
+    private readonly gain: number;
+    private readonly maxSpeed: number;
+
+    constructor(body: Body, grabPoint: Vec2, gain = 40, maxSpeed = 10) {
+        const local = body.toLocal(grabPoint);
+        super(body, body, local, local);
+        this.target = grabPoint;
+        this.sample = grabPoint;
+        this.gain = gain;
+        this.maxSpeed = maxSpeed;
+        this.visible = false;
+        this.listed = false;
+    }
+
+    // call whenever the pointer moves
+    setTarget(p: Vec2): void {
+        this.target = p;
+        if (this.idle < 0.008) return; // too soon for a stable velocity estimate
+        const vx = (p.x - this.sample.x) / this.idle;
+        const vy = (p.y - this.sample.y) / this.idle;
+        this.cursorVx += (vx - this.cursorVx) * 0.5;
+        this.cursorVy += (vy - this.cursorVy) * 0.5;
+        this.sample = p;
+        this.idle = 0;
+    }
+
+    // Call just before removing the joint: the body leaves with the cursor's (smoothed) velocity,
+    // unless something is holding it back (a wall), in which case it keeps what it has.
+    release(): void {
+        const cursor = Math.hypot(this.cursorVx, this.cursorVy);
+        if (cursor > 0 && Math.hypot(this.a.vx, this.a.vy) > 0.5 * cursor) {
+            this.a.vx = this.cursorVx;
+            this.a.vy = this.cursorVy;
+        }
+    }
+
+    prepare(dt: number): void {
+        this.idle += dt;
+        if (this.idle > 0.06) {
+            // the pointer stopped
+            this.cursorVx = 0;
+            this.cursorVy = 0;
+        }
+        const anchor = this.a.toWorld(this.localA);
+        let vx = this.cursorVx + (this.target.x - anchor.x) * this.gain;
+        let vy = this.cursorVy + (this.target.y - anchor.y) * this.gain;
+        const speed = Math.hypot(vx, vy);
+        if (speed > this.maxSpeed) {
+            vx *= this.maxSpeed / speed;
+            vy *= this.maxSpeed / speed;
+        }
+        this.a.vx = vx;
+        this.a.vy = vy;
+        this.a.angVel = 0;
+    }
+
+    warmStart(): void {}
+    solve(): void {}
+}
+
 const MOUSE_ANGULAR_DAMPING = 4;
 
 // Soft pin between the cursor and a grabbed body. Stiffness is per unit mass, using the mass of
