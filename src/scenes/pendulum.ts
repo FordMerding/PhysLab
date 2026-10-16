@@ -32,4 +32,4 @@ function build(world: World): void {
     world.addJoint(new PinJoint(stick, pendulum, {localA: new Vec2(0, length/2)}));
 }
 
-export const pendulumDemo: Scene = { name: "Pendulum", view: { x: 3.3, y: 3.2, zoom: 100 }, build };
+export const pendulumDemo: Scene = { name: "Pendulum", view: { x: 3.3, y: 3.2, zoom: 100, w: 3, h: 6.8 }, build };

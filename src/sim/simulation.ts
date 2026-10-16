@@ -34,6 +34,7 @@ export class Simulation {
 
     readonly view = new ViewSettings();
 
+    prevMode: MouseMode = "none";
     mode: MouseMode = "force";
     onModeChange: () => void = () => {};
     readonly spawn: SpawnSettings = { ...DEFAULT_SPAWN };
@@ -57,6 +58,7 @@ export class Simulation {
     }
 
     setMode(mode: MouseMode): void {
+        this.prevMode = this.mode;
         this.mode = mode;
         this.connectFirst = null;
         this.onModeChange();
