@@ -1,14 +1,8 @@
 import { Vec2 } from "../engine/vec2";
-import { DistanceJoint, PinJoint } from "../engine/joints";
-import { Rope } from "../engine/rope";
+import { PinJoint } from "../engine/joints";
 import { ALL_LAYERS, ROPE_LAYER } from "../engine/filter";
 import type { World } from "../engine/world";
 import type { Scene } from "./scene";
-import { arc } from "./arc";
-
-const PULLEY_RADIUS = 0.2;
-const ROPE_RADIUS = 0.05;
-const TRACK = PULLEY_RADIUS + ROPE_RADIUS; // rope centerline distance from a pulley's center
 
 // Block and tackle: the rope runs from a ceiling hook, under the movable pulley, over the
 // fixed pulley and down to the handle. The load rests on a shelf; pull the handle down to lift it.
