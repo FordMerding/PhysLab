@@ -1,6 +1,7 @@
 import { Vec2 } from "../engine/vec2";
 import { FollowJoint, MouseJoint } from "../engine/joints";
 import { anchorAt, connect } from "../sim/connect";
+import type { RulerPoint } from "../sim/ruler";
 import type { Simulation } from "../sim/simulation";
 import type { Camera } from "../render/camera";
 
@@ -82,6 +83,7 @@ export class ViewControls {
             return;
         }
         if (sim.mode === "connect") return this.connectTap(point, margin);
+        if (sim.mode === "measure") return this.measureTap(point, margin);
 
         const world = sim.world;
         const body = world.pickAt(point, margin, true);
@@ -104,14 +106,32 @@ export class ViewControls {
         }
     }
 
+    private measureTap(point: Vec2, margin: number): void {
+        const sim = this.sim;
+        const body = sim.world.pickAt(point, margin, true);
+        const picked = body && body.visible ? body : null;
+        const end: RulerPoint =
+            picked && !picked.isStatic
+                ? { body: picked, local: sim.rulerSnap ? Vec2.ZERO : picked.toLocal(point) }
+                : picked
+                  ? { body: null, local: sim.rulerSnap ? picked.pos : point } // static: a fixed world point is enough
+                  : { body: null, local: point };
+        sim.ruler.tap(end);
+        // the measurement is done once both ends are placed: back to the neutral mode, the reading stays
+        if (sim.ruler.complete) sim.setMode("none");
+        else sim.onModeChange();
+    }
+
     private connectTap(point: Vec2, margin: number): void {
         const sim = this.sim;
         const body = sim.world.pickAt(point, margin, true);
         const picked = body && body.visible ? body : null;
-        const first = sim.connectFirst;
+        const kind = sim.connectOptions.kind;
+        if (kind === "rope" || kind === "pulley") return this.sim.addRoutePoint(picked, picked ? picked.toLocal(point) : point);
+        const first = sim.connectTaps[0];
 
         if (!first) {
-            sim.connectFirst = { body: picked, local: picked ? picked.toLocal(point) : point };
+            sim.connectTaps = [{ body: picked, local: picked ? picked.toLocal(point) : point }];
             sim.onModeChange();
             return;
         }

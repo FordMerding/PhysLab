@@ -501,3 +501,317 @@ button.active {
     flex: 1 0 100%;
     margin: 0;
 }
+/* measuring tools */
+.measure-tab .clock {
+    font: 600 24px/1.2 ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    padding: 4px 0 8px;
+}
+
+.measure-tab .laps {
+    color: var(--dim);
+    font-size: 11px;
+    margin-top: 4px;
+    word-break: break-word;
+}
+
+.measure-tab .measure-hint {
+    color: var(--dim);
+    padding-bottom: 4px;
+}
+
+.measure-tab .buttons {
+    margin: 2px 0 6px;
+}
+
+.graph {
+    margin: 4px 0 8px;
+}
+
+.graph-canvas {
+    width: 100%;
+    display: block;
+    background: var(--field);
+    border-radius: 4px;
+}
+
+.graph-readout {
+    color: var(--dim);
+    font-size: 10px;
+    min-height: 14px;
+    padding: 2px 2px 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.modebar {
+    flex-wrap: wrap;
+}
+
+.modebar button {
+    flex: 1 0 28%;
+}
+
+/* ---- toolbar: run controls, speed and mouse modes in one place ---- */
+.toolbar {
+    position: absolute;
+    top: 8px;
+    left: 288px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    padding: 6px 8px;
+    pointer-events: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+    box-sizing: border-box;
+}
+
+.tb-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.toolbar button {
+    flex: 0 0 auto;
+    min-width: 64px;
+}
+
+.toolbar .modebar {
+    margin: 0;
+    flex: 0 1 auto;
+}
+
+.toolbar .modebar button {
+    flex: 0 0 auto;
+    min-width: 58px;
+    padding: 5px 6px;
+}
+
+.tb-time {
+    font: 600 14px/1 ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    min-width: 62px;
+    text-align: right;
+}
+
+.tb-speed {
+    background: var(--field);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 4px 4px;
+    font: inherit;
+}
+
+.tb-cursor {
+    margin-left: auto;
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+button.primary {
+    background: #2a3a5c;
+    border-color: #35507f;
+}
+
+button.primary:hover {
+    background: #34487a;
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.right {
+    top: 64px;
+}
+
+.hint {
+    top: 66px;
+}
+
+.grid.two {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px 12px;
+}
+
+.grid.stats {
+    grid-template-columns: repeat(2, 1fr);
+    margin-top: 6px;
+}
+
+.dots {
+    display: inline-flex;
+    gap: 3px;
+    flex: 0 0 auto;
+    width: 26px;
+}
+
+.row .dots + label {
+    flex: 1;
+}
+
+.status-line {
+    margin-top: 6px;
+    color: var(--dim);
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.status-line.error {
+    color: #ff8a80;
+}
+
+button.danger-inline {
+    color: #ff8a80;
+}
+
+.measure-tab .laps {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.measure-tab .lap {
+    display: grid;
+    grid-template-columns: 52px 1fr auto;
+    gap: 8px;
+    padding: 3px 6px;
+    background: var(--field);
+    border-radius: 4px;
+}
+
+.measure-tab .lap .n,
+.measure-tab .lap .d {
+    color: var(--dim);
+}
+
+.measure-tab .lap .t {
+    text-align: right;
+}
+
+@media (max-width: 900px) {
+    .toolbar {
+        left: 8px;
+        gap: 6px;
+    }
+
+    .toolbar .modebar {
+        flex: 1 0 100%;
+    }
+
+    .toolbar .modebar button {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .tb-cursor {
+        display: none;
+    }
+
+    .right {
+        top: 8px;
+    }
+
+    .hint {
+        top: 104px;
+    }
+}
+
+/* ---- hide the side panels ---- */
+.panels-hidden .left,
+.panels-hidden .right,
+.panels-hidden .sheet,
+.panels-hidden .nav {
+    display: none !important;
+}
+
+.panels-hidden .toolbar {
+    left: 8px;
+}
+
+.panels-button {
+    min-width: 40px !important;
+    padding: 5px 8px;
+}
+
+/* ---- the hint can carry buttons (Done / Cancel while tapping a pulley rope) ---- */
+.hint {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.hint.hidden {
+    display: none;
+}
+
+.hint.interactive {
+    pointer-events: auto;
+}
+
+.hint-actions {
+    display: inline-flex;
+    gap: 6px;
+}
+
+.hint-actions.hidden {
+    display: none;
+}
+
+.hint-button {
+    flex: 0 0 auto;
+    padding: 2px 12px;
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+    color: #fff;
+}
+
+.hint-button:hover {
+    background: rgba(255, 255, 255, 0.32);
+}
+
+/* ---- the inspector only shows when asked for ---- */
+.inspector.dismissed {
+    display: none;
+}
+
+.panel-title:has(.close) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.panel-title .close {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 0 8px;
+    font-size: 18px;
+    line-height: 1.2;
+    background: transparent;
+    border: none;
+    color: var(--dim);
+}
+
+.panel-title .close:hover {
+    color: var(--text);
+}
+
+@media (max-width: 900px) {
+    .inspector-button {
+        display: none !important;
+    }
+}

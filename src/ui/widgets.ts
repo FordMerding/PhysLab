@@ -125,7 +125,12 @@ export function checkbox(label: string, value: boolean, onChange: (v: boolean) =
     };
 }
 
-export function select(label: string, options: readonly string[], index: number, onChange: (i: number) => void): Control<number> {
+export interface SelectControl extends Control<number> {
+    // replaces the list of options
+    setOptions(options: readonly string[], index: number): void;
+}
+
+export function select(label: string, options: readonly string[], index: number, onChange: (i: number) => void): SelectControl {
     const input = el("select");
     options.forEach((name, i) => input.add(new Option(name, String(i))));
     input.selectedIndex = index;
@@ -138,6 +143,10 @@ export function select(label: string, options: readonly string[], index: number,
     return {
         element: row,
         set(i) {
+            input.selectedIndex = i;
+        },
+        setOptions(names, i) {
+            input.replaceChildren(...names.map((name, k) => new Option(name, String(k))));
             input.selectedIndex = i;
         },
     };
@@ -210,8 +219,8 @@ export function readout(label: string): Readout {
     };
 }
 
-export function section(title: string): { element: HTMLElement; body: HTMLElement } {
-    const root = el("div", "section");
+export function section(title: string, collapsed = false): { element: HTMLElement; body: HTMLElement } {
+    const root = el("div", collapsed ? "section collapsed" : "section");
     const head = el("div", "section-title", title);
     const body = el("div", "section-body");
     head.addEventListener("click", () => root.classList.toggle("collapsed"));
@@ -239,7 +248,11 @@ export function tabs(items: ReadonlyArray<{ name: string; content: HTMLElement }
     return root;
 }
 
-export function textField(label: string, value: string, onChange: (v: string) => void): Control<string> {
+export interface TextControl extends Control<string> {
+    value(): string; // what is typed in the field right now
+}
+
+export function textField(label: string, value: string, onChange: (v: string) => void): TextControl {
     const input = el("input");
     input.type = "text";
     input.value = value;
@@ -255,6 +268,7 @@ export function textField(label: string, value: string, onChange: (v: string) =>
         set(v) {
             if (document.activeElement !== input) input.value = v;
         },
+        value: () => input.value,
     };
 }
 

@@ -56,6 +56,8 @@ export class Rope {
     readonly joints: Joint[] = [];
     readonly restLength: number;
     readonly radius: number;
+    // what the two ends are pinned to (kept so a scene can be saved)
+    readonly pins: Array<{ end: "start" | "end"; body: Body; local: Vec2 }> = [];
     name: string;
     private damper: NodeDamper | null = null;
 
@@ -105,10 +107,12 @@ export class Rope {
 
     // `local` is the attachment point in the body's own frame; it should coincide with the rope end.
     pinStart(body: Body, local: Vec2 = Vec2.ZERO): void {
+        this.pins.push({ end: "start", body, local });
         this.pin(body, local, this.nodes[0]);
     }
 
     pinEnd(body: Body, local: Vec2 = Vec2.ZERO): void {
+        this.pins.push({ end: "end", body, local });
         this.pin(body, local, this.nodes[this.nodes.length - 1]);
     }
 

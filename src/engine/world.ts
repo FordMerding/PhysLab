@@ -28,6 +28,8 @@ export class World {
     readonly bodies: Body[] = [];
     readonly joints: Joint[] = [];
     readonly ropes: Rope[] = []; // registered by Rope.addTo, for listing and inspection
+    // called after every fixed physics step (the measuring tools sample here)
+    readonly stepListeners: Array<(world: World) => void> = [];
     gravity: Vec2 = new Vec2(0, -9.81);
     iterations = ITERATIONS;
     fixedDt = FIXED_DT; // s, length of one physics step
@@ -96,6 +98,11 @@ export class World {
         if (b.right !== undefined) wall("Right wall", new Vec2(-1, 0), new Vec2(b.right, 0));
     }
 
+    // true for the floor / ceiling / wall planes made by setBounds
+    isBoundary(body: Body): boolean {
+        return this.bounds.includes(body);
+    }
+
     getBounds(): BoundsOptions {
         return { ...this.boundsOptions };
     }
@@ -162,6 +169,7 @@ export class World {
         for (let i = 0; i < this.substeps; i++) this.subStep(h);
         this.time += dt;
         for (const b of this.bodies) b.endStep(dt);
+        for (const listener of this.stepListeners) listener(this);
     }
 
     private subStep(dt: number): void {

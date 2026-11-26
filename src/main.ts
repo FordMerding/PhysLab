@@ -4,6 +4,8 @@ import { Renderer } from "./render/renderer";
 import { ViewControls } from "./input/viewControls";
 import { Simulation, type MouseMode } from "./sim/simulation";
 import { scenes } from "./scenes";
+import { sceneFromData } from "./sim/sceneIO";
+import { loadSavedScenes } from "./sim/sceneStore";
 import type { Scene } from "./scenes/scene";
 import { createUI } from "./ui/ui";
 import "./ui/ui.css";
@@ -11,12 +13,13 @@ import "./ui/ui.css";
 const canvas = document.getElementById("simulation") as HTMLCanvasElement;
 const camera = new Camera();
 const renderer = new Renderer(canvas, camera);
-const sim = new Simulation(scenes);
+// built-in scenes first, then the ones the user saved in this browser
+const sim = new Simulation([...scenes, ...loadSavedScenes().map(sceneFromData)]);
 const controls = new ViewControls(canvas, sim, camera);
 const ui = createUI(sim, controls, camera);
 
-const MODE_KEYS: MouseMode[] = ["none", "force", "move", "create", "connect"];
-const CURSORS: Record<MouseMode, string> = { none: "default", force: "grab", move: "move", create: "copy", connect: "crosshair" };
+const MODE_KEYS: MouseMode[] = ["none", "force", "move", "create", "connect", "measure"];
+const CURSORS: Record<MouseMode, string> = { none: "default", force: "grab", move: "move", create: "copy", connect: "crosshair", measure: "crosshair" };
 
 // zoom out far enough that the whole scene fits the screen
 function fitZoom(scene: Scene): number {
@@ -42,16 +45,25 @@ window.addEventListener("resize", () => renderer.resize());
 renderer.resize();
 
 // pick the starting scene with ?scene=<index>
-sim.loadScene(scenes[Number(new URLSearchParams(location.search).get("scene") ?? 0)] ?? scenes[0]);
+sim.loadScene(sim.scenes[Number(new URLSearchParams(location.search).get("scene") ?? 0)] ?? sim.scenes[0]);
 
 window.addEventListener("keydown", (e) => {
+    if (e.code === "Enter" && sim.routeActive && !(e.target instanceof HTMLInputElement)) {
+        sim.finishRoute();
+        e.preventDefault();
+        return;
+    }
+    if (e.code === "KeyH" && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLSelectElement)) {
+        ui.togglePanels();
+        return;
+    }
     if (e.code === "Escape") {
-        if (sim.mode === "create" || sim.mode === "connect") sim.setMode("none");
+        if (sim.mode === "create" || sim.mode === "connect" || sim.mode === "measure") sim.setMode("none");
         sim.clearSelection();
         return;
     }
     const typing = e.target instanceof HTMLInputElement && e.target.type !== "checkbox" && e.target.type !== "range";
-    const digit = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5"].indexOf(e.code);
+    const digit = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6"].indexOf(e.code);
     if (digit !== -1 && !typing && !(e.target instanceof HTMLSelectElement)) {
         sim.setMode(MODE_KEYS[digit]);
         return;

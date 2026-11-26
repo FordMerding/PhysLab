@@ -3,19 +3,19 @@ import { tabs } from "./widgets";
 
 export interface LayoutParts {
     objects: HTMLElement;
-    world: HTMLElement;
+    scene: HTMLElement;
+    measure: HTMLElement;
     view: HTMLElement;
-    sim: HTMLElement;
     inspector: HTMLElement;
-    quickBar: HTMLElement;
+    toolbar: HTMLElement;
     hint: HTMLElement;
 }
 
 const MOBILE_QUERY = "(max-width: 900px)";
 
-// Wide screens: a dock on the left (Objects / World / View) and a column on the right
-// (simulation window and inspector). Narrow screens: a quick run bar on top and a bottom
-// navigation that opens one panel at a time as a sheet. The same elements move between both.
+// Wide screens: a dock on the left (Objects / Scene / Measure / View), the inspector on the right
+// and the toolbar on top. Narrow screens: the toolbar on top and a bottom navigation that opens one
+// panel at a time as a sheet. The same elements move between both.
 export function createLayout(root: HTMLElement, parts: LayoutParts, hasSelection: () => boolean) {
     const query = window.matchMedia(MOBILE_QUERY);
     let sheetTab: string | null = null;
@@ -25,9 +25,9 @@ export function createLayout(root: HTMLElement, parts: LayoutParts, hasSelection
 
     const mobileTabs: Array<[string, HTMLElement]> = [
         ["Objects", parts.objects],
-        ["World", parts.world],
+        ["Scene", parts.scene],
+        ["Measure", parts.measure],
         ["View", parts.view],
-        ["Sim", parts.sim],
         ["Inspector", parts.inspector],
     ];
 
@@ -36,13 +36,14 @@ export function createLayout(root: HTMLElement, parts: LayoutParts, hasSelection
         left.append(
             tabs([
                 { name: "Objects", content: parts.objects },
-                { name: "World", content: parts.world },
+                { name: "Scene", content: parts.scene },
+                { name: "Measure", content: parts.measure },
                 { name: "View", content: parts.view },
             ])
         );
         const right = el("div", "right");
-        right.append(parts.sim, parts.inspector);
-        root.replaceChildren(left, right, parts.hint);
+        right.append(parts.inspector);
+        root.replaceChildren(parts.toolbar, left, right, parts.hint);
     };
 
     const setSheet = (name: string | null): void => {
@@ -68,7 +69,7 @@ export function createLayout(root: HTMLElement, parts: LayoutParts, hasSelection
             nav.append(b);
             return { name, button: b };
         });
-        root.replaceChildren(parts.quickBar, sheet, nav, parts.hint);
+        root.replaceChildren(parts.toolbar, sheet, nav, parts.hint);
         setSheet(sheetTab === "Inspector" && !hasSelection() ? null : sheetTab);
     };
 
@@ -77,11 +78,18 @@ export function createLayout(root: HTMLElement, parts: LayoutParts, hasSelection
     render();
 
     return {
-        // the inspector pops up when something gets selected on a small screen
-        selectionChanged(): void {
+        // On a small screen the Inspector button appears when something is selected; the sheet opens
+        // by itself only if the user asked for that.
+        selectionChanged(openByItself: boolean): void {
             if (!query.matches) return;
-            if (hasSelection()) setSheet("Inspector");
-            else setSheet(sheetTab === "Inspector" ? null : sheetTab);
+            if (hasSelection() && openByItself) setSheet("Inspector");
+            else setSheet(!hasSelection() && sheetTab === "Inspector" ? null : sheetTab);
+        },
+        openInspector(): void {
+            if (query.matches) setSheet("Inspector");
+        },
+        closeInspector(): void {
+            if (query.matches && sheetTab === "Inspector") setSheet(null);
         },
     };
 }

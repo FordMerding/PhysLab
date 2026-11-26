@@ -41,6 +41,17 @@ export abstract class Joint {
         return [this.a.toWorld(this.localA), this.b.toWorld(this.localB)];
     }
 
+    // the attachment points in each body's own frame
+    get localAnchors(): [Vec2, Vec2] {
+        return [this.localA, this.localB];
+    }
+
+    // the line the renderer draws; joints that bend around fixed points override it
+    polyline(): Vec2[] {
+        const [p, q] = this.anchors();
+        return [p, q];
+    }
+
     abstract prepare(dt: number): void;
     abstract warmStart(): void;
     abstract solve(): void;
@@ -322,6 +333,114 @@ export class PinJoint extends Joint {
         const shift = new Vec2((-k11 * err.x + k01 * err.y) / det, (k01 * err.x - k00 * err.y) / det);
         this.a.applyPositionShift(shift.neg(), rA);
         this.b.applyPositionShift(shift, rB);
+    }
+}
+
+// a fixed point, or a static body whose position is the point (so the pulley wheel can be moved)
+export type GroundPoint = Vec2 | Body;
+
+const groundPosition = (g: GroundPoint): Vec2 => ("pos" in g ? g.pos : g);
+
+export interface PulleyJointOptions {
+    groundA: GroundPoint; // fixed point the rope runs to from body a (a pulley wheel, a hook)
+    groundB: GroundPoint;
+    ratio?: number; // 1 for an ordinary pulley, 2 for a movable pulley carried by two rope segments
+    localA?: Vec2;
+    localB?: Vec2;
+    length?: number; // total rope length |a - groundA| + ratio * |b - groundB|; defaults to the current one
+}
+
+// An ideal rope: no mass, no stretch, no friction in the pulley. It joins two bodies over fixed points:
+//   |a - groundA| + ratio * |b - groundB| = length   (the rope can go slack, but never stretches)
+// Use it for textbook pulley problems (Atwood machine, block and tackle), where a chain of rope
+// nodes adds its own mass and weight to the system. `tension()` is the rope tension in N.
+export class PulleyJoint extends Joint {
+    readonly groundA: GroundPoint;
+    readonly groundB: GroundPoint;
+    readonly ratio: number;
+    length: number;
+    private acc = 0; // accumulated rope impulse (>= 0, pulls both bodies toward their ground points)
+    private mass = 0;
+    private slack = 0;
+    private h = 0;
+    private uA: Vec2 = Vec2.ZERO;
+    private uB: Vec2 = Vec2.ZERO;
+
+    constructor(a: Body, b: Body, o: PulleyJointOptions) {
+        super(a, b, o.localA, o.localB);
+        this.groundA = o.groundA;
+        this.groundB = o.groundB;
+        this.ratio = o.ratio ?? 1;
+        this.length = o.length ?? this.ropeLength();
+        this.color = "#c9a227";
+        this.lineWidth = 0;
+    }
+
+    private ropeLength(): number {
+        const [pA, pB] = this.anchors();
+        return pA.dist(groundPosition(this.groundA)) + this.ratio * pB.dist(groundPosition(this.groundB));
+    }
+
+    override polyline(): Vec2[] {
+        const [pA, pB] = this.anchors();
+        return [pA, groundPosition(this.groundA), groundPosition(this.groundB), pB];
+    }
+
+    // rope tension, N
+    tension(): number {
+        return this.h > 0 ? this.acc / this.h : 0;
+    }
+
+    private geometry(): { rA: Vec2; rB: Vec2; k: number } {
+        const [pA, pB] = this.anchors();
+        const rA = pA.sub(this.a.pos);
+        const rB = pB.sub(this.b.pos);
+        this.uA = pA.sub(groundPosition(this.groundA)).normalize();
+        this.uB = pB.sub(groundPosition(this.groundB)).normalize();
+        const cA = rA.cross(this.uA);
+        const cB = rB.cross(this.uB);
+        const k =
+            this.a.invMass +
+            this.a.invInertia * cA * cA +
+            this.ratio * this.ratio * (this.b.invMass + this.b.invInertia * cB * cB);
+        return { rA, rB, k };
+    }
+
+    prepare(dt: number): void {
+        this.h = dt;
+        const { rA, rB, k } = this.geometry();
+        this.rA = rA;
+        this.rB = rB;
+        this.mass = k > 0 ? 1 / k : 0;
+        const c = this.ropeLength() - this.length;
+        // slack rope: let the bodies approach until the rope is exactly taut
+        this.slack = c < 0 ? c / dt : 0;
+    }
+
+    private apply(lambda: number): void {
+        this.a.applyImpulse(this.uA.mul(-lambda), this.rA);
+        this.b.applyImpulse(this.uB.mul(-lambda * this.ratio), this.rB);
+    }
+
+    warmStart(): void {
+        this.apply(this.acc);
+    }
+
+    solve(): void {
+        const cdot = this.uA.dot(this.a.velocityAt(this.rA)) + this.ratio * this.uB.dot(this.b.velocityAt(this.rB));
+        const next = Math.max(0, this.acc + this.mass * (cdot + this.slack));
+        const d = next - this.acc;
+        this.acc = next;
+        this.apply(d);
+    }
+
+    override correctPosition(): void {
+        const { rA, rB, k } = this.geometry();
+        const c = this.ropeLength() - this.length;
+        if (c <= 0 || k === 0) return;
+        const lambda = Math.min(c, MAX_POSITION_CORRECTION) / k;
+        this.a.applyPositionShift(this.uA.mul(-lambda), rA);
+        this.b.applyPositionShift(this.uB.mul(-lambda * this.ratio), rB);
     }
 }
 

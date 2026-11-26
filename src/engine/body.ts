@@ -167,6 +167,11 @@ export class Body {
         (other.ignored ??= new Set()).add(this);
     }
 
+    // bodies this one never collides with (set by ignoreCollisionWith)
+    get ignoredBodies(): Body[] {
+        return this.ignored ? [...this.ignored] : [];
+    }
+
     ignores(other: Body): boolean {
         return this.ignored !== null && this.ignored.has(other);
     }

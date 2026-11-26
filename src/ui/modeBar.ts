@@ -8,6 +8,7 @@ const MODES: Array<[MouseMode, string, string]> = [
     ["move", "Move", "3 - carry bodies to the cursor (they keep colliding and keep their speed)"],
     ["create", "Create", "4 - click to place the chosen object"],
     ["connect", "Connect", "5 - pick two points to join with a rope, rod, spring or hinge"],
+    ["measure", "Ruler", "6 - pick two points to measure the distance between them"],
 ];
 
 // Row of buttons that switches what the left mouse button does.

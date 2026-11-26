@@ -1,8 +1,9 @@
 import { Vec2 } from "../engine/vec2";
-import { circle, polygonSize, scalePolygon, shapeArea } from "../engine/shapes";
+import { circle, polygonSize, scalePolygon } from "../engine/shapes";
 import type { Body } from "../engine/body";
 import type { Rope } from "../engine/rope";
-import { DistanceJoint, PinJoint, SpringJoint, type Joint } from "../engine/joints";
+import { DistanceJoint, PinJoint, PulleyJoint, SpringJoint, type Joint } from "../engine/joints";
+import { PulleyRope } from "../engine/pulleyRope";
 import type { Simulation } from "../sim/simulation";
 import { el } from "./dom";
 import { button, checkbox, colorField, info, numberField, section, select, textField, type Control } from "./widgets";
@@ -33,17 +34,14 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
     header.body.append(name.element, color.element);
 
     // live values that are also editable
-    const motion = section("Position & motion");
+    const motion = section("Position and velocity");
     const x = numberField({ label: "X", value: 0, step: 0.05, unit: "m", onChange: (v) => (body.pos = new Vec2(v, body.pos.y)) });
     const y = numberField({ label: "Y", value: 0, step: 0.05, unit: "m", onChange: (v) => (body.pos = new Vec2(body.pos.x, v)) });
     const angle = numberField({ label: "Angle", value: 0, step: 1, unit: "°", onChange: (v) => (body.angle = v / DEG) });
     const vx = numberField({ label: "Velocity X", value: 0, step: 0.05, unit: "m/s", onChange: (v) => (body.vx = v) });
     const vy = numberField({ label: "Velocity Y", value: 0, step: 0.05, unit: "m/s", onChange: (v) => (body.vy = v) });
     const omega = numberField({ label: "Ang. velocity", value: 0, step: 0.05, unit: "rad/s", onChange: (v) => (body.angVel = v) });
-    const speed = info("Speed");
-    const accel = info("Acceleration");
-    const energy = info("Kinetic energy");
-    motion.body.append(x.element, y.element, angle.element, vx.element, vy.element, omega.element, speed.element, accel.element, energy.element);
+    motion.body.append(x.element, y.element, angle.element, vx.element, vy.element, omega.element);
 
     const props = section("Properties");
     const mass = numberField({
@@ -88,23 +86,11 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
     }
     const friction = numberField({ label: "Friction", value: body.friction, step: 0.01, min: 0, max: 5, onChange: (v) => (body.friction = v) });
     const restitution = numberField({ label: "Restitution", value: body.restitution, step: 0.01, min: 0, max: 1, onChange: (v) => (body.restitution = v) });
+    const advanced = section("Damping", true);
     const linDamp = numberField({ label: "Lin. damping", value: body.linearDamping, step: 0.05, min: 0, unit: "1/s", onChange: (v) => (body.linearDamping = v) });
     const angDamp = numberField({ label: "Ang. damping", value: body.angularDamping, step: 0.05, min: 0, unit: "1/s", onChange: (v) => (body.angularDamping = v) });
-    const inertia = info("Moment of inertia");
-    const area = info("Area");
-    const density = info("Density");
-    props.body.append(
-        mass.element,
-        isStatic.element,
-        ...sizeFields.map((f) => f.element),
-        friction.element,
-        restitution.element,
-        linDamp.element,
-        angDamp.element,
-        inertia.element,
-        area.element,
-        density.element
-    );
+    props.body.append(mass.element, isStatic.element, ...sizeFields.map((f) => f.element), friction.element, restitution.element);
+    advanced.body.append(linDamp.element, angDamp.element);
 
     const dynamics = section("Forces");
     const weight = info("Weight");
@@ -121,7 +107,7 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
         },
         "danger"
     );
-    root.append(header.element, motion.element, props.element, dynamics.element, remove);
+    root.append(header.element, motion.element, props.element, advanced.element, dynamics.element, remove);
 
     return {
         element: root,
@@ -133,11 +119,6 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
             vx.set(body.vx);
             vy.set(body.vy);
             omega.set(body.angVel);
-            speed.set(`${num(mag(body.vx, body.vy))} m/s`);
-            const ax = body.smoothAccX;
-            const ay = body.smoothAccY;
-            accel.set(`${vec(ax, ay, "m/s²")}  (${num(mag(ax, ay))})`);
-            energy.set(`${num(0.5 * body.mass * (body.vx ** 2 + body.vy ** 2) + 0.5 * body.inertia * body.angVel ** 2)} J`);
 
             mass.set(body.nominalMass);
             isStatic.set(body.isStatic);
@@ -152,10 +133,6 @@ function bodyContent(sim: Simulation, body: Body, onListChange: () => void): Con
                 sizeFields[0]?.set(size.w);
                 sizeFields[1]?.set(size.h);
             }
-            const a = shapeArea(body.shape);
-            inertia.set(body.isStatic ? "∞" : `${num(body.inertia, 3)} kg·m²`);
-            area.set(`${num(a, 3)} m²`);
-            density.set(a > 0 ? `${num(body.nominalMass / a)} kg/m²` : "-");
 
             const wx = body.mass * g.x;
             const wy = body.mass * g.y;
@@ -245,6 +222,23 @@ function jointContent(sim: Simulation, joint: Joint, onListChange: () => void): 
         props.body.append(rest.element, k.element, c.element);
         controls.push({ set: () => (rest.set(joint.restLength), k.set(joint.stiffness), c.set(joint.damping)) });
         tension = info("Tension");
+    } else if (joint instanceof PulleyRope) {
+        const length = numberField({ label: "Rope length", value: joint.length, step: 0.01, min: 0.01, unit: "m", onChange: (v) => (joint.length = v) });
+        const wheels = joint.route.filter((e) => e.radius > 0).length;
+        props.body.append(
+            el("div", "row info", `An ideal rope over ${wheels} pulley${wheels === 1 ? "" : "s"}: no mass, no stretch, no friction.`),
+            length.element
+        );
+        controls.push({ set: () => length.set(joint.length) });
+        tension = info("Tension");
+    } else if (joint instanceof PulleyJoint) {
+        const length = numberField({ label: "Rope length", value: joint.length, step: 0.01, min: 0.01, unit: "m", onChange: (v) => (joint.length = v) });
+        props.body.append(
+            el("div", "row info", joint.ratio === 2 ? "An ideal rope with a movable pulley: the handle moves twice as far as the load." : "An ideal rope over a fixed pulley: no mass, no stretch, no friction."),
+            length.element
+        );
+        controls.push({ set: () => length.set(joint.length) });
+        tension = info("Tension");
     } else if (joint instanceof PinJoint) {
         props.body.append(el("div", "row info", "A hinge keeps both bodies joined at one point; rotation stays free."));
     }
@@ -268,15 +262,22 @@ function jointContent(sim: Simulation, joint: Joint, onListChange: () => void): 
             for (const c of controls) c.set();
             if (tension && (joint instanceof DistanceJoint || joint instanceof SpringJoint)) {
                 tension.set(`${num(-joint.force(), 1)} N`); // negative = compression
+            } else if (tension && (joint instanceof PulleyJoint || joint instanceof PulleyRope)) {
+                tension.set(`${num(joint.tension(), 2)} N`);
             }
         },
     };
 }
 
 // Right-hand panel; shows whatever is selected in the simulation.
-export function createInspector(sim: Simulation, onListChange: () => void) {
+export function createInspector(sim: Simulation, onListChange: () => void, onClose: () => void) {
     const root = el("div", "panel inspector hidden");
-    const title = el("div", "panel-title", "Inspector");
+    const title = el("div", "panel-title");
+    const close = el("button", "close", "×");
+    close.type = "button";
+    close.title = "Close the inspector (the selection stays)";
+    close.addEventListener("click", onClose);
+    title.append(el("span", "", "Inspector"), close);
     const body = el("div", "panel-body");
     root.append(title, body);
 
@@ -295,6 +296,10 @@ export function createInspector(sim: Simulation, onListChange: () => void) {
     return {
         element: root,
         rebuild,
+        // the inspector is only shown when it was asked for (or opens by itself, if that is switched on)
+        setShown(shown: boolean): void {
+            root.classList.toggle("dismissed", !shown);
+        },
         update(): void {
             content?.update();
         },

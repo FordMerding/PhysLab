@@ -3,6 +3,8 @@ import type { Body } from "../engine/body";
 import type { Joint } from "../engine/joints";
 import type { Rope } from "../engine/rope";
 import type { Simulation } from "../sim/simulation";
+import { Ruler } from "../sim/ruler";
+import { buildPulleyRope } from "../sim/connect";
 import type { Camera } from "./camera";
 
 const GRID_MIN_PIXELS = 60;
@@ -72,14 +74,86 @@ export class Renderer {
         for (const b of world.bodies) if (b.shape.type === "plane") this.drawPlane(b);
         if (sim.selectedRope) this.drawRopeHighlight(sim.selectedRope);
         this.drawJoints(sim);
+        if (sim.view.trail) this.drawTrail(sim);
 
         const sorted = world.bodies.filter((b) => b.visible && b.shape.type !== "plane").sort((p, q) => p.z - q.z);
         for (const b of sorted) this.drawBody(b);
         if (sim.selectedBody) this.drawSelection(sim.selectedBody);
 
-        if (sim.mode === "connect" && sim.connectFirst) this.drawPendingAnchor(sim.connectFirst.body, sim.connectFirst.local);
-        const labels = this.drawVectors(sim);
+        if (sim.mode === "connect") {
+            this.drawPendingRoute(sim);
+            for (const tap of sim.connectTaps) this.drawPendingAnchor(tap.body, tap.local);
+        }
+        const labels = [...this.drawVectors(sim), ...this.drawRuler(sim)];
         this.drawLabels(labels);
+    }
+
+    // path of the recorded body
+    private drawTrail(sim: Simulation): void {
+        const samples = sim.recorder.samples;
+        if (samples.length < 2) return;
+        const ctx = this.ctx;
+        ctx.strokeStyle = "rgba(255, 213, 74, 0.8)";
+        ctx.lineWidth = 2 * this.px;
+        ctx.setLineDash([5 * this.px, 4 * this.px]);
+        ctx.beginPath();
+        samples.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // the distance tool: a line between two points with its length, dx and dy
+    private drawRuler(sim: Simulation): Label[] {
+        const ruler = sim.ruler;
+        if (!ruler.a) return [];
+        const ctx = this.ctx;
+        const px = this.px;
+        const color = "#ffd54a";
+        const a = Ruler.position(ruler.a);
+        const dot = (p: Vec2): void => {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 4 * px, 0, Math.PI * 2);
+            ctx.fill();
+        };
+        dot(a);
+        if (!ruler.b) return [];
+        const b = Ruler.position(ruler.b);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2 * px;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        // the horizontal and vertical components
+        ctx.lineWidth = px;
+        ctx.setLineDash([4 * px, 4 * px]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        dot(b);
+        const v = b.sub(a);
+        return [{ text: `${v.len().toFixed(3)} m  (dx ${v.x.toFixed(3)}, dy ${v.y.toFixed(3)})`, at: a.add(b).div(2), color }];
+    }
+
+    // the points tapped so far for a pulley rope, joined by a dashed line (the real rope appears on Done)
+    private drawPendingRoute(sim: Simulation): void {
+        const kind = sim.connectOptions.kind;
+        if ((kind !== "pulley" && kind !== "rope") || sim.connectTaps.length < 2) return;
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#4c8dff";
+        ctx.lineWidth = 2 * this.px;
+        ctx.setLineDash([6 * this.px, 5 * this.px]);
+        ctx.beginPath();
+        // the rope as it will be made (wrapping the wheels); the straight line through the taps if it cannot be made yet
+        const made = kind === "pulley" ? buildPulleyRope(sim.world, sim.connectTaps, true) : null;
+        const path = made && "joint" in made ? made.joint.polyline() : sim.connectTaps.map((tap) => (tap.body ? tap.body.toWorld(tap.local) : tap.local));
+        path.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.stroke();
+        ctx.setLineDash([]);
     }
 
     private drawPendingAnchor(body: Body | null, local: Vec2): void {
@@ -210,21 +284,21 @@ export class Renderer {
         const px = this.px;
         for (const j of sim.world.joints) {
             if (!j.visible) continue;
-            const [p, q] = j.anchors();
-            if (j === sim.selectedJoint) this.strokeJoint(j, p, q, "rgba(255, 213, 74, 0.55)", 8 * px);
-            this.strokeJoint(j, p, q, j.color, j.lineWidth > 0 ? j.lineWidth : 2 * px);
+            if (j === sim.selectedJoint) this.strokeJoint(j, "rgba(255, 213, 74, 0.55)", 8 * px);
+            this.strokeJoint(j, j.color, j.lineWidth > 0 ? j.lineWidth : 2 * px);
         }
         ctx.setLineDash([]);
     }
 
-    private strokeJoint(j: Joint, p: Vec2, q: Vec2, color: string, width: number): void {
+    private strokeJoint(j: Joint, color: string, width: number): void {
         const ctx = this.ctx;
         ctx.strokeStyle = color;
         ctx.lineWidth = width;
         ctx.setLineDash(j.dashed ? [4 * this.px, 4 * this.px] : []);
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(q.x, q.y);
+        const line = j.polyline();
+        ctx.moveTo(line[0].x, line[0].y);
+        for (let i = 1; i < line.length; i++) ctx.lineTo(line[i].x, line[i].y);
         ctx.stroke();
     }
 

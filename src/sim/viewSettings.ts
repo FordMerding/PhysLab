@@ -5,6 +5,7 @@ export class ViewSettings {
     forces = false; // weight and contact/joint forces
     netForce = false;
     labels = true;
+    trail = false; // path of the recorded body
     selectedOnly = true;
     autoScale = true;
     velocityScale = 30; // px per m/s, when auto-scale is off
